@@ -60,6 +60,15 @@ pulse while working, and settle to done/failed — all driven by the core's own
   a metrics grid in the detail panel.
 - **Export.** One click (or `GET /api/export`) dumps the full ecosystem state —
   HQ info, aggregate stats, and every mission — as JSON for archival.
+- **Commander readiness.** `/api/info` reports the real resolved provider/model
+  and two distinct states — `ready` (credentials resolve, HQ can run on demand)
+  and `online` (the Commander agent is built and live) — via a cheap credential
+  probe that runs **without** building the agent or hitting the network. The
+  header shows a live status dot (green online · amber ready · red offline), and
+  when no provider resolves an **offline banner** explains the fix (`hermes
+  model` / `~/.hermes/.env`) with a one-click retry; launching is blocked until
+  HQ is ready. The probe caches success and re-checks on failure, so fixing your
+  config is reflected without a restart.
 - **Quality-of-life.** Mission filter/search, inline delete, `⌘/Ctrl+Enter` to
   launch, toast notifications, and a polished dark command-center theme.
 - **Mission re-run.** Re-launch any finished mission's prompt as a fresh mission

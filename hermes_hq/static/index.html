@@ -61,6 +61,13 @@
   .hqdot.on{background:#36d399;box-shadow:0 0 6px 1px rgba(54,211,153,.7);}
   .hqdot.ready{background:#fbbf24;box-shadow:0 0 6px 1px rgba(251,191,36,.55);}
   .hqdot.off{background:#f87171;box-shadow:0 0 6px 1px rgba(248,113,113,.6);}
+  #offline-banner{display:flex;align-items:center;gap:9px;padding:9px 18px;font-size:12px;
+    color:#fde2e2;background:linear-gradient(90deg,rgba(248,113,113,.18),rgba(248,113,113,.06));
+    border-top:1px solid rgba(248,113,113,.4);border-bottom:1px solid rgba(248,113,113,.4);}
+  #offline-banner .ob-ic{color:#f87171;font-size:14px}
+  #offline-banner b{color:#fff}
+  #offline-banner code{background:rgba(0,0,0,.35);padding:1px 5px;border-radius:4px;font-size:11px}
+  #offline-banner a{color:#fca5a5;text-decoration:underline;cursor:pointer}
   header .iconbtn{background:var(--panel2);border:1px solid var(--edge);color:var(--dim);
     border-radius:8px;padding:5px 11px;font-size:11px;cursor:pointer;font-family:inherit}
   header .iconbtn:hover{color:var(--accent);border-color:var(--accent)}
@@ -342,6 +349,14 @@
     <div class="stat"><span class="v" id="s-uptime">—</span><span class="k">uptime</span></div>
   </div>
 
+  <!-- OFFLINE BANNER (shown when no provider/credentials resolve) -->
+  <div id="offline-banner" hidden>
+    <span class="ob-ic">⚠</span>
+    <span class="ob-txt">HQ Commander offline — <b id="ob-reason">no inference provider resolved</b>.
+      Run <code>hermes model</code> to pick a provider/model, or set a key in <code>~/.hermes/.env</code>, then
+      <a href="#" id="ob-retry">retry</a>.</span>
+  </div>
+
   <!-- LEFT: mission console + history -->
   <div class="col">
     <div id="mission">
@@ -488,6 +503,7 @@ let centerView = 'graph';     // 'graph' | 'org' | 'analytics'
 let activePod = 'default';    // header pod selector — scopes missions + new launches
 let drawerTab = 'brain';      // 'brain' | 'pods' | 'library' | 'schedules'
 let chainFrom = null;         // upstream mission id when staging a chained mission
+let hqReady = true;           // does the Commander have a resolvable provider? (from /api/info)
 
 // Categorized mission template library. Each category holds ready-to-run
 // multi-agent missions that show off parallel delegation.
@@ -539,15 +555,21 @@ async function loadInfo(){
     const r = await fetch('/api/info'); const j = await r.json();
     $('#hq-model').textContent = j.hq.model || '—';
     const mp=$('#hq-model'); if(mp) mp.title='provider: '+(j.hq.provider||'—');
+    const online=!!j.hq.online, ready=!!j.hq.ready;
+    hqReady = ready;
     const dot=$('#hq-dot');
     if(dot){
-      const online=!!j.hq.online, ready=!!j.hq.ready;
       dot.classList.toggle('on', online);
       dot.classList.toggle('ready', ready && !online);
       dot.classList.toggle('off', !ready);
       dot.title = online ? 'Commander online — agent live'
         : ready ? 'Ready — Commander will spin up on first mission'
         : ('Offline — '+(j.hq.error || 'no provider/credentials resolved'));
+    }
+    const banner=$('#offline-banner');
+    if(banner){
+      banner.hidden = ready;
+      if(!ready) $('#ob-reason').textContent = j.hq.error || 'no inference provider resolved';
     }
     $('#hq-conc').textContent = (j.delegation.max_concurrent_children ?? '—') +
        '×d' + (j.delegation.max_spawn_depth ?? '—');
@@ -610,6 +632,7 @@ function reflectDepth(d){
 async function launchMission(){
   const prompt = $('#prompt').value.trim();
   if(!prompt) return;
+  if(!hqReady){ toast('HQ Commander offline — configure a provider first (see banner)'); return; }
   const btn=$('#launch'); btn.disabled=true; btn.textContent='DISPATCHING…';
   const body={prompt, pod:activePod};
   if(chainFrom) body.chained_from=chainFrom;
@@ -624,6 +647,7 @@ async function launchMission(){
            chainFrom=null; $('#prompt').placeholder='Describe a mission. The HQ Commander will decompose it and dispatch specialist subagents in parallel…'; }
 }
 $('#launch').onclick = launchMission;
+{ const rt=$('#ob-retry'); if(rt) rt.onclick=(e)=>{ e.preventDefault(); loadInfo(); toast('Re-checking provider…'); }; }
 // keyboard: Cmd/Ctrl+Enter launches from the prompt
 $('#prompt').addEventListener('keydown', e=>{
   if((e.metaKey||e.ctrlKey) && e.key==='Enter'){ e.preventDefault(); launchMission(); }
