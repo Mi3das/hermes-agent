@@ -132,3 +132,8 @@ scripts/out/
 # stores the published notes. They are not a build artifact and must never be
 # committed to the repo root. See the hermes-release skill.
 RELEASE_v*.md
+.devswarm-temp/
+
+# HERMES HQ build artifacts
+hermes_hq/desktop/launcher.rendered.sh
+hermes_hq/desktop/build/

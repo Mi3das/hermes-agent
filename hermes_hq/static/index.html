@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HERMES HQ — Multi-Agent Command Center</title>
+<style>
+  :root{
+    --bg:#060912; --panel:#0c1322; --panel2:#101a2e; --panel3:#0a1120;
+    --edge:#1b2840; --edge2:#243651;
+    --txt:#dce6f5; --dim:#7c8aa5; --idle:#43507a;
+    --accent:#36e0c8; --accent2:#5b8cff; --violet:#a779ff;
+    --run:#ffce54; --done:#36e0c8; --fail:#ff5e6c;
+    --glow:0 0 18px rgba(54,224,200,.35);
+  }
+  /* ---- THEMES ---- */
+  /* Midnight (default) is :root above. Below: alternate palettes. */
+  html[data-theme="ember"]{
+    --bg:#0c0707; --panel:#19100d; --panel2:#241511; --panel3:#150c0a;
+    --edge:#3a2018; --edge2:#4d2a1f;
+    --txt:#f5e6dc; --dim:#b08a78; --idle:#6b4a3c;
+    --accent:#ff8a3c; --accent2:#ff5e6c; --violet:#ffce54;
+    --run:#ffce54; --done:#ff8a3c; --fail:#ff5e6c;
+    --glow:0 0 18px rgba(255,138,60,.35);
+  }
+  html[data-theme="matrix"]{
+    --bg:#04080a; --panel:#081512; --panel2:#0c1f18; --panel3:#06120e;
+    --edge:#143028; --edge2:#1d4538;
+    --txt:#d6f5e6; --dim:#6fb89a; --idle:#3c6b54;
+    --accent:#39ff14; --accent2:#36e0c8; --violet:#7cff9a;
+    --run:#caff54; --done:#39ff14; --fail:#ff5e6c;
+    --glow:0 0 18px rgba(57,255,20,.3);
+  }
+  html[data-theme="light"]{
+    --bg:#eef2f8; --panel:#ffffff; --panel2:#f2f6fc; --panel3:#e8eef7;
+    --edge:#d3deec; --edge2:#c2d1e4;
+    --txt:#1a2336; --dim:#5c6b85; --idle:#9aa7bd;
+    --accent:#0d9488; --accent2:#3b6cf6; --violet:#8b5cf6;
+    --run:#d97706; --done:#0d9488; --fail:#dc2626;
+    --glow:0 0 16px rgba(13,148,136,.25);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,monospace;
+    -webkit-font-smoothing:antialiased;}
+  #app{display:grid;grid-template-columns:340px 1fr 380px;grid-template-rows:52px 40px 1fr;
+    height:100vh;gap:1px;background:var(--edge);}
+  /* ---- header ---- */
+  header{grid-column:1/4;background:linear-gradient(90deg,#0a1120,#0d1830);
+    display:flex;align-items:center;gap:16px;padding:0 18px;border-bottom:1px solid var(--edge);}
+  header .logo{font-weight:800;letter-spacing:3px;font-size:18px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text;background-clip:text;color:transparent;}
+  header .tag{color:var(--dim);font-size:11px;letter-spacing:1px;}
+  header .spacer{flex:1}
+  header .pill{font-size:11px;padding:4px 10px;border:1px solid var(--edge);
+    border-radius:20px;color:var(--dim);background:var(--panel);}
+  header .pill b{color:var(--accent)}
+  .hqdot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;
+    vertical-align:middle;background:#6b7280;box-shadow:0 0 0 0 transparent;transition:background .3s;}
+  .hqdot.on{background:#36d399;box-shadow:0 0 6px 1px rgba(54,211,153,.7);}
+  .hqdot.ready{background:#fbbf24;box-shadow:0 0 6px 1px rgba(251,191,36,.55);}
+  .hqdot.off{background:#f87171;box-shadow:0 0 6px 1px rgba(248,113,113,.6);}
+  header .iconbtn{background:var(--panel2);border:1px solid var(--edge);color:var(--dim);
+    border-radius:8px;padding:5px 11px;font-size:11px;cursor:pointer;font-family:inherit}
+  header .iconbtn:hover{color:var(--accent);border-color:var(--accent)}
+  /* ---- stats strip ---- */
+  #stats{grid-column:1/4;background:var(--panel3);display:flex;align-items:center;
+    gap:0;border-bottom:1px solid var(--edge);overflow-x:auto;}
+  .stat{display:flex;flex-direction:column;justify-content:center;padding:2px 18px;
+    border-right:1px solid var(--edge);min-width:96px;height:100%;white-space:nowrap}
+  .stat .v{font-size:15px;font-weight:700;color:var(--txt);line-height:1.1}
+  .stat .v.accent{color:var(--accent)} .stat .v.run{color:var(--run)}
+  .stat .v.done{color:var(--done)} .stat .v.fail{color:var(--fail)}
+  .stat .k{font-size:9px;letter-spacing:1px;color:var(--idle);text-transform:uppercase}
+
+  .col{background:var(--panel);overflow:hidden;display:flex;flex-direction:column;min-height:0;}
+  .col h2{font-size:11px;letter-spacing:2px;color:var(--dim);margin:0;
+    padding:11px 16px 8px;text-transform:uppercase;border-bottom:1px solid var(--edge);
+    display:flex;align-items:center;gap:8px}
+  .col h2 .count{margin-left:auto;color:var(--idle);font-size:10px;font-weight:400}
+  .scroll{overflow-y:auto;flex:1;min-height:0}
+  .scroll::-webkit-scrollbar{width:8px}
+  .scroll::-webkit-scrollbar-thumb{background:#1b2840;border-radius:8px}
+
+  /* Mission console */
+  #mission{padding:14px 16px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid var(--edge)}
+  #prompt{width:100%;background:var(--panel2);border:1px solid var(--edge);color:var(--txt);
+    border-radius:8px;padding:10px;font-family:inherit;font-size:13px;resize:vertical;min-height:78px;}
+  #prompt:focus{outline:none;border-color:var(--accent);box-shadow:var(--glow)}
+  #launch{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#03121a;
+    border:none;border-radius:8px;padding:10px;font-weight:800;letter-spacing:1px;cursor:pointer;
+    font-family:inherit;transition:filter .15s}
+  #launch:hover{filter:brightness(1.1)}
+  #launch:disabled{opacity:.5;cursor:not-allowed}
+  .hint{font-size:9px;color:var(--idle);text-align:right;margin-top:-4px}
+  .quick{display:flex;flex-wrap:wrap;gap:6px}
+  .quick button{background:var(--panel2);border:1px solid var(--edge);color:var(--dim);
+    border-radius:14px;padding:4px 9px;font-size:10px;cursor:pointer;font-family:inherit}
+  .quick button:hover{color:var(--accent);border-color:var(--accent)}
+  .preset-bar{display:flex;gap:6px;align-items:center}
+  .preset-bar select{flex:1;background:var(--panel2);border:1px solid var(--edge);color:var(--txt);
+    border-radius:7px;padding:5px 8px;font-family:inherit;font-size:10.5px;cursor:pointer}
+  .preset-bar select:focus{outline:none;border-color:var(--accent)}
+  .preset-bar button{background:var(--panel2);border:1px solid var(--edge);color:var(--dim);
+    border-radius:7px;padding:5px 10px;font-size:10.5px;cursor:pointer;font-family:inherit;white-space:nowrap}
+  .preset-bar button:hover,.preset-bar button.on{color:var(--accent);border-color:var(--accent)}
+  .quick.grid{flex-direction:column;gap:5px;max-height:188px;overflow:auto}
+  .quick.grid button{border-radius:7px;text-align:left;white-space:normal;line-height:1.35;
+    padding:7px 9px;width:100%}
+
+  /* mission list */
+  .mfilter{padding:8px 12px;border-bottom:1px solid var(--edge);display:flex;gap:6px}
+  .mfilter input{flex:1;background:var(--panel2);border:1px solid var(--edge);color:var(--txt);
+    border-radius:6px;padding:5px 8px;font-family:inherit;font-size:11px}
+  .mfilter input:focus{outline:none;border-color:var(--accent)}
+  .mission-item{padding:10px 16px;border-bottom:1px solid var(--edge);cursor:pointer;position:relative}
+  .mission-item:hover{background:var(--panel2)}
+  .mission-item:hover .mdel{opacity:1}
+  .mission-item.sel{background:var(--panel2);border-left:3px solid var(--accent)}
+  .mission-item .p{font-size:12px;line-height:1.4;max-height:48px;overflow:hidden;color:var(--txt)}
+  .mission-item .meta{display:flex;gap:8px;align-items:center;margin-top:6px;font-size:10px;color:var(--dim)}
+  .mission-item .meta .mm{color:var(--idle)}
+  .mdel{position:absolute;top:8px;right:10px;opacity:0;transition:opacity .12s;
+    background:none;border:none;color:var(--idle);cursor:pointer;font-size:13px}
+  .mdel:hover{color:var(--fail)}
+  .badge{font-size:9px;padding:2px 7px;border-radius:10px;letter-spacing:1px;text-transform:uppercase;font-weight:700}
+  .badge.running{background:rgba(255,206,84,.15);color:var(--run)}
+  .badge.completed{background:rgba(54,224,200,.15);color:var(--done)}
+  .badge.failed{background:rgba(255,94,108,.15);color:var(--fail)}
+  .badge.interrupted{background:rgba(124,138,165,.18);color:var(--dim)}
+  .badge.cancelled{background:rgba(167,121,255,.16);color:var(--violet)}
+
+  /* center column: view tabs + graph + org chart */
+  #centercol{display:flex;flex-direction:column;min-height:0}
+  .centertabs{display:flex;border-bottom:1px solid var(--edge);background:var(--panel3);flex:0 0 auto}
+  .centertabs button{flex:1;background:none;border:none;border-bottom:2px solid transparent;
+    color:var(--dim);padding:9px 0;font-size:10px;letter-spacing:1px;cursor:pointer;
+    font-family:inherit;text-transform:uppercase}
+  .centertabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  /* graph */
+  #graphwrap{position:relative;flex:1;min-height:0;background:radial-gradient(circle at 50% 40%,#0b1426,#060912 70%)}
+  #graph{display:block;width:100%;height:100%}
+  #legend{position:absolute;top:12px;left:14px;display:flex;gap:14px;font-size:10px;color:var(--dim)}
+  #legend .k{display:flex;align-items:center;gap:5px}
+  #legend .dot{width:9px;height:9px;border-radius:50%}
+  #ctrl{position:absolute;bottom:14px;left:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  #ctrl button{background:var(--panel2);border:1px solid var(--edge);color:var(--dim);
+    border-radius:8px;padding:7px 12px;font-size:11px;cursor:pointer;font-family:inherit}
+  #ctrl button:hover{color:var(--accent);border-color:var(--accent)}
+  #ctrl button.armed{color:var(--run);border-color:var(--run)}
+  #ctrl .depth{display:flex;align-items:center;gap:8px;background:var(--panel2);
+    border:1px solid var(--edge);border-radius:8px;padding:5px 12px;font-size:11px;color:var(--dim)}
+  #ctrl .depth b{color:var(--accent);min-width:10px;text-align:center}
+  #ctrl input[type=range]{width:90px;accent-color:var(--accent);cursor:pointer}
+  #statbox{position:absolute;top:12px;right:16px;text-align:right;font-size:11px;color:var(--dim)}
+  #statbox b{color:var(--accent);font-size:22px}
+  /* org chart */
+  #orgwrap{flex:1;min-height:0;display:flex;flex-direction:column;
+    background:radial-gradient(circle at 50% 30%,#0b1426,#060912 75%)}
+  .orghead{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;
+    border-bottom:1px solid var(--edge);font-size:10px;letter-spacing:1px;color:var(--dim)}
+  .orghead button{background:var(--panel2);border:1px solid var(--edge);color:var(--accent);
+    border-radius:7px;padding:5px 11px;font-size:10px;cursor:pointer;font-family:inherit}
+  .orghead button:hover{border-color:var(--accent)}
+  #orgbody{padding:12px 16px;display:flex;flex-wrap:wrap;gap:12px;align-content:flex-start}
+  .vert{background:var(--panel);border:1px solid var(--edge2);border-radius:10px;
+    width:228px;display:flex;flex-direction:column;overflow:hidden}
+  .vert .vhead{padding:9px 12px;background:linear-gradient(90deg,var(--panel2),var(--panel));
+    border-bottom:1px solid var(--edge);display:flex;align-items:center;justify-content:space-between}
+  .vert .vname{font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.5px}
+  .vert .voutcome{font-size:9px;color:var(--idle);margin-top:2px}
+  .vert .vdel{background:none;border:none;color:var(--idle);cursor:pointer;font-size:12px}
+  .vert .vdel:hover{color:var(--fail)}
+  .vert .vbody{padding:8px 10px;display:flex;flex-direction:column;gap:7px}
+  .spec{background:var(--panel2);border:1px solid var(--edge);border-radius:7px;padding:6px 8px}
+  .spec .sname{font-size:10.5px;font-weight:600;color:var(--accent2)}
+  .spec .subs{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+  .spec .sub{font-size:8.5px;color:var(--dim);background:var(--panel3);border:1px solid var(--edge);
+    border-radius:9px;padding:1px 6px}
+  /* header pod selector */
+  .podsel{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--idle);letter-spacing:1px}
+  .podsel select{background:var(--panel2);border:1px solid var(--accent2);color:var(--txt);
+    border-radius:14px;padding:4px 9px;font-family:inherit;font-size:10.5px;cursor:pointer;max-width:170px}
+  .podsel select:focus{outline:none;border-color:var(--accent)}
+  /* brain drawer */
+  #scrim{position:fixed;inset:0;background:rgba(2,5,12,.62);opacity:0;pointer-events:none;
+    transition:opacity .2s;z-index:60}
+  #scrim.open{opacity:1;pointer-events:auto}
+  #drawer{position:fixed;top:0;right:0;height:100vh;width:460px;max-width:92vw;z-index:70;
+    background:var(--panel);border-left:1px solid var(--edge2);transform:translateX(100%);
+    transition:transform .22s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;
+    box-shadow:-12px 0 40px rgba(0,0,0,.4)}
+  #drawer.open{transform:translateX(0)}
+  .dhead{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--edge)}
+  .dhead .dt{font-size:14px;font-weight:800;letter-spacing:1px;color:var(--accent)}
+  .dhead .x{margin-left:auto;background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer}
+  .dhead .x:hover{color:var(--fail)}
+  .dtabs{display:flex;border-bottom:1px solid var(--edge);background:var(--panel3)}
+  .dtabs button{flex:1;background:none;border:none;border-bottom:2px solid transparent;color:var(--dim);
+    padding:9px 0;font-size:10px;letter-spacing:1px;cursor:pointer;font-family:inherit;text-transform:uppercase}
+  .dtabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .dbody{flex:1;min-height:0;overflow:auto;padding:14px 18px}
+  .kbform{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
+  .kbform input,.kbform textarea{background:var(--panel2);border:1px solid var(--edge);color:var(--txt);
+    border-radius:7px;padding:8px;font-family:inherit;font-size:12px}
+  .kbform textarea{min-height:60px;resize:vertical}
+  .kbform input:focus,.kbform textarea:focus{outline:none;border-color:var(--accent)}
+  .kbform button{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#03121a;
+    border:none;border-radius:7px;padding:8px;font-weight:800;cursor:pointer;font-family:inherit;font-size:11px}
+  .kbitem{background:var(--panel2);border:1px solid var(--edge);border-radius:8px;padding:9px 11px;margin-bottom:8px;position:relative}
+  .kbitem .kt{font-size:12px;font-weight:700;color:var(--txt)}
+  .kbitem .kb{font-size:11px;color:var(--dim);margin-top:4px;white-space:pre-wrap;line-height:1.45}
+  .kbitem .ktags{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+  .kbitem .ktag{font-size:8.5px;color:var(--accent);background:var(--panel3);border:1px solid var(--edge);border-radius:9px;padding:1px 7px}
+  .kbitem .kdel{position:absolute;top:8px;right:10px;background:none;border:none;color:var(--idle);cursor:pointer;font-size:12px}
+  .kbitem .kdel:hover{color:var(--fail)}
+  .podcard{background:var(--panel2);border:1px solid var(--edge);border-radius:8px;padding:10px 12px;margin-bottom:9px}
+  .podcard.active{border-color:var(--accent2)}
+  .podcard .pn{font-size:12px;font-weight:700;color:var(--accent2);display:flex;align-items:center;gap:7px}
+  .podcard .pd{font-size:10.5px;color:var(--dim);margin-top:3px}
+  .podcard .pmeta{font-size:9px;color:var(--idle);margin-top:5px;display:flex;gap:10px}
+  .podcard .pdel{margin-left:auto;background:none;border:none;color:var(--idle);cursor:pointer;font-size:12px}
+  .podcard .pdel:hover{color:var(--fail)}
+
+  /* right column */
+  .tabs{display:flex;border-bottom:1px solid var(--edge);background:var(--panel3)}
+  .tabs button{flex:1;background:none;border:none;border-bottom:2px solid transparent;
+    color:var(--dim);padding:9px 0;font-size:10px;letter-spacing:1px;cursor:pointer;
+    font-family:inherit;text-transform:uppercase}
+  .tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .event{padding:8px 16px;border-bottom:1px solid var(--edge);font-size:11px;line-height:1.5}
+  .event .ts{color:var(--idle);font-size:9px}
+  .event.error{color:var(--fail)}
+  .event.commander{color:var(--accent)}
+  .event.subagent{color:var(--accent2)}
+  /* commander live reasoning */
+  #cmdstream{flex:1;min-height:0;overflow:auto;padding:12px 16px;font-size:11.5px;
+    line-height:1.6;white-space:pre-wrap;word-break:break-word;color:#c4d2ea;background:var(--panel3)}
+  #cmdstream .cursor{display:inline-block;width:7px;height:13px;background:var(--accent);
+    animation:blink 1s steps(1) infinite;vertical-align:text-bottom;margin-left:1px}
+  @keyframes blink{50%{opacity:0}}
+  #detail{padding:14px 16px;border-top:1px solid var(--edge);max-height:46%;overflow-y:auto}
+  #detail h3{margin:0 0 8px;font-size:12px;color:var(--accent);letter-spacing:1px}
+  #detail .row{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);padding:3px 0}
+  #detail .row b{color:var(--txt);font-weight:600}
+  #detail pre{white-space:pre-wrap;word-break:break-word;background:var(--panel2);
+    border:1px solid var(--edge);border-radius:8px;padding:10px;font-size:11px;color:var(--txt);
+    max-height:220px;overflow:auto;margin:8px 0 0}
+  .metgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+  .metgrid .m{background:var(--panel2);border:1px solid var(--edge);border-radius:7px;padding:7px 9px}
+  .metgrid .m .mv{font-size:15px;font-weight:700;color:var(--accent)}
+  .metgrid .m .mk{font-size:8.5px;letter-spacing:1px;color:var(--idle);text-transform:uppercase}
+  .cancelbtn{margin-top:10px;background:var(--panel2);border:1px solid var(--fail);
+    color:var(--fail);border-radius:8px;padding:7px 14px;cursor:pointer;font-family:inherit;font-size:11px;width:100%}
+  .cancelbtn:hover{background:rgba(255,94,108,.12)}
+  .rerunbtn{margin-top:8px;background:var(--panel2);border:1px solid var(--accent);
+    color:var(--accent);border-radius:8px;padding:7px 14px;cursor:pointer;font-family:inherit;font-size:11px;width:100%}
+  .rerunbtn:hover{background:rgba(54,224,200,.12)}
+  .rerunbtn:disabled{opacity:.5;cursor:not-allowed}
+  .chainref{color:var(--accent)}
+  /* inter-pod analytics */
+  #analyticswrap{flex:1;flex-direction:column;min-height:0;padding:12px;overflow:hidden}
+  .podstat{background:var(--panel2);border:1px solid var(--edge);border-radius:9px;padding:11px 13px;margin-bottom:10px}
+  .podstat-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
+  .podstat-h b{font-size:13px;color:var(--txt)}
+  .podstat-sub{font-size:10px;color:var(--idle)}
+  .podbar{height:6px;background:var(--panel3);border-radius:4px;overflow:hidden;margin-bottom:9px}
+  .podbar-f{height:100%;background:var(--accent);border-radius:4px;transition:width .3s}
+  .podstat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+  .podstat-grid>div{text-align:center}
+  .podstat-grid span{display:block;font-size:13px;font-weight:700;color:var(--accent)}
+  .podstat-grid em{font-style:normal;font-size:8px;letter-spacing:.6px;color:var(--idle);text-transform:uppercase}
+  /* schedules */
+  .schrow{display:flex;gap:8px}
+  .schrow input{flex:1}
+  .kbitem.off{opacity:.55}
+  .schtoggle{font-size:8.5px}
+  /* command palette */
+  #palette-scrim{position:fixed;inset:0;background:rgba(2,5,10,.5);z-index:90;opacity:0;pointer-events:none;transition:opacity .12s}
+  #palette-scrim.open{opacity:1;pointer-events:auto}
+  #palette{position:fixed;top:14vh;left:50%;transform:translateX(-50%) scale(.97);width:560px;max-width:92vw;z-index:91;
+    background:var(--panel);border:1px solid var(--edge);border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.6);
+    opacity:0;pointer-events:none;transition:opacity .12s,transform .12s;overflow:hidden}
+  #palette.open{opacity:1;pointer-events:auto;transform:translateX(-50%) scale(1)}
+  #palette-input{width:100%;box-sizing:border-box;background:var(--panel2);border:none;border-bottom:1px solid var(--edge);
+    color:var(--txt);font-family:inherit;font-size:14px;padding:14px 16px;outline:none}
+  #palette-list{max-height:46vh;overflow-y:auto;padding:6px}
+  .pcmd{padding:9px 12px;border-radius:7px;font-size:12px;color:var(--dim);cursor:pointer;
+    display:flex;justify-content:space-between;align-items:center}
+  .pcmd.sel{background:var(--panel3);color:var(--txt)}
+  .pcmd:hover{background:var(--panel2)}
+  .pcmd .phint{font-size:9px;color:var(--idle);border:1px solid var(--edge);border-radius:5px;padding:1px 6px}
+  .liveout{background:#060a12;border:1px solid var(--edge);border-radius:8px;margin-top:8px;
+    max-height:180px;overflow:auto;padding:8px 10px;font-size:10.5px;line-height:1.55}
+  .liveout .ln{color:var(--dim);white-space:pre-wrap;word-break:break-word}
+  .liveout .ln.tool{color:#bcd}
+  .liveout .ln.start{color:var(--accent2)}
+  .liveout .ln.complete{color:var(--done)}
+  .liveout .ln.think{color:#9aa7c4;font-style:italic}
+  .liveout .empty{color:var(--idle)}
+  .lbl{font-size:9px;letter-spacing:1px;color:var(--idle);text-transform:uppercase;margin-top:10px}
+  .muted{color:var(--idle);font-size:11px;padding:14px 16px}
+  #conn{position:fixed;bottom:8px;right:12px;font-size:10px;color:var(--idle)}
+  #conn.ok{color:var(--done)} #conn.bad{color:var(--fail)}
+  #toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);
+    background:var(--panel2);border:1px solid var(--accent);color:var(--txt);
+    padding:9px 18px;border-radius:10px;font-size:12px;opacity:0;transition:opacity .25s;
+    pointer-events:none;box-shadow:var(--glow);z-index:50}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">HERMES&nbsp;HQ</div>
+    <div class="tag">AUTONOMOUS MULTI-AGENT COMMAND CENTER</div>
+    <div class="spacer"></div>
+    <div class="podsel" title="Active client pod — scopes missions">
+      <span>◑ POD</span>
+      <select id="podselect"></select>
+    </div>
+    <div class="pill"><span id="hq-dot" class="hqdot" title="resolving…"></span>commander&nbsp;<b id="hq-model">…</b></div>
+    <div class="pill">concurrency&nbsp;<b id="hq-conc">…</b></div>
+    <button class="iconbtn" id="brainbtn" title="Open the agency brain (knowledge + pods)">🧠 BRAIN</button>
+    <button class="iconbtn" id="export" title="Export all missions as JSON">⤓ EXPORT</button>
+    <button class="iconbtn" id="theme" title="Cycle theme (T)">◐ THEME</button>
+  </header>
+
+  <!-- STATS STRIP -->
+  <div id="stats">
+    <div class="stat"><span class="v accent" id="s-total">0</span><span class="k">missions</span></div>
+    <div class="stat"><span class="v run" id="s-running">0</span><span class="k">running</span></div>
+    <div class="stat"><span class="v done" id="s-done">0</span><span class="k">completed</span></div>
+    <div class="stat"><span class="v" id="s-rate">—</span><span class="k">success rate</span></div>
+    <div class="stat"><span class="v accent" id="s-active">0</span><span class="k">active agents</span></div>
+    <div class="stat"><span class="v" id="s-subs">0</span><span class="k">total spawned</span></div>
+    <div class="stat"><span class="v" id="s-tools">0</span><span class="k">tool calls</span></div>
+    <div class="stat"><span class="v" id="s-tokens">0</span><span class="k">tokens</span></div>
+    <div class="stat"><span class="v" id="s-cost">—</span><span class="k">est. cost</span></div>
+    <div class="stat"><span class="v" id="s-avg">—</span><span class="k">avg duration</span></div>
+    <div class="stat"><span class="v" id="s-uptime">—</span><span class="k">uptime</span></div>
+  </div>
+
+  <!-- LEFT: mission console + history -->
+  <div class="col">
+    <div id="mission">
+      <h2 style="padding:0;border:0;margin:0 0 2px">New Mission</h2>
+      <textarea id="prompt" placeholder="Describe a mission. The HQ Commander will decompose it and dispatch specialist subagents in parallel…"></textarea>
+      <div class="preset-bar">
+        <select id="preset-cat"></select>
+        <button id="preset-toggle" title="Browse mission templates">▤ templates</button>
+      </div>
+      <div class="quick" id="quick"></div>
+      <button id="launch">▶ LAUNCH MISSION</button>
+      <div class="hint">⌘ / Ctrl + Enter to launch</div>
+    </div>
+    <h2>Missions <span class="count" id="mcount"></span></h2>
+    <div class="mfilter"><input id="mfilter" placeholder="filter missions…" /></div>
+    <div class="scroll" id="missions"><div class="muted">No missions yet.</div></div>
+  </div>
+
+  <!-- CENTER: live agent graph + org chart -->
+  <div class="col" id="centercol">
+    <div class="centertabs">
+      <button id="view-graph" class="active">◉ Live Graph</button>
+      <button id="view-org">▦ Org Chart</button>
+      <button id="view-analytics">📊 Analytics</button>
+    </div>
+    <div id="graphwrap">
+      <canvas id="graph"></canvas>
+      <div id="legend">
+        <div class="k"><span class="dot" style="background:var(--accent)"></span>commander</div>
+        <div class="k"><span class="dot" style="background:var(--run)"></span>running</div>
+        <div class="k"><span class="dot" style="background:var(--done)"></span>done</div>
+        <div class="k"><span class="dot" style="background:var(--fail)"></span>failed</div>
+      </div>
+      <div id="statbox"><b id="stat-n">0</b><br>active subagents</div>
+      <div id="ctrl">
+        <button id="pause">⏸ Pause spawns</button>
+        <div class="depth">
+          <span>nesting depth</span>
+          <input id="depth" type="range" min="1" max="4" step="1" value="1" />
+          <b id="depthval">1</b>
+        </div>
+      </div>
+    </div>
+    <div id="orgwrap" style="display:none">
+      <div class="orghead">
+        <span>DEPARTMENT VERTICALS · SPECIALISTS · SCOPED SUB-AGENTS</span>
+        <button id="addvert" title="Add a department vertical">+ vertical</button>
+      </div>
+      <div class="scroll" id="orgbody"><div class="muted">Loading org chart…</div></div>
+    </div>
+    <div id="analyticswrap" style="display:none">
+      <div class="orghead"><span>INTER-POD ANALYTICS · MISSIONS · SUCCESS · TOKENS · COST</span></div>
+      <div class="scroll" id="analyticsbody"><div class="muted">No data yet.</div></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: tabs (activity / commander) + detail -->
+  <div class="col">
+    <div class="tabs">
+      <button id="tab-activity" class="active">Activity</button>
+      <button id="tab-commander">Commander</button>
+    </div>
+    <div class="scroll" id="feed"><div class="muted">Awaiting mission…</div></div>
+    <div id="cmdstream" style="display:none"><span class="muted" style="padding:0">No mission selected.</span></div>
+    <div id="detail"><div class="muted" style="padding:0">Select a mission or click an agent node.</div></div>
+  </div>
+</div>
+<div id="conn">connecting…</div>
+<div id="toast"></div>
+
+<!-- COMMAND PALETTE (⌘K / Ctrl-K) -->
+<div id="palette-scrim"></div>
+<div id="palette">
+  <input id="palette-input" placeholder="Type a command…  (↑↓ to navigate, ↵ to run, esc to close)" autocomplete="off" />
+  <div id="palette-list"></div>
+</div>
+
+<!-- BRAIN DRAWER (gBRAIN + Client Pods) -->
+<div id="scrim"></div>
+<div id="drawer">
+  <div class="dhead">
+    <div class="dt">🧠 AGENCY gBRAIN</div>
+    <button class="x" id="drawer-close" title="Close">✕</button>
+  </div>
+  <div class="dtabs">
+    <button id="dtab-brain" class="active">Knowledge</button>
+    <button id="dtab-pods">Client Pods</button>
+    <button id="dtab-library">Specialists</button>
+    <button id="dtab-schedules">Schedules</button>
+  </div>
+  <div class="dbody" id="dbody-brain">
+    <div class="kbform">
+      <input id="kb-title" placeholder="Entry title (e.g. Voice & Tone)" />
+      <textarea id="kb-body" placeholder="Knowledge the whole company should apply — playbooks, conventions, positioning…"></textarea>
+      <input id="kb-tags" placeholder="tags, comma, separated (optional)" />
+      <button id="kb-add">+ ADD TO AGENCY BRAIN</button>
+    </div>
+    <div id="kb-list"><div class="muted" style="padding:0">No knowledge entries yet.</div></div>
+  </div>
+  <div class="dbody" id="dbody-pods" style="display:none">
+    <div class="kbform">
+      <input id="pod-name" placeholder="Client / pod name (e.g. Acme Corp)" />
+      <input id="pod-desc" placeholder="Short description (optional)" />
+      <button id="pod-add">+ CREATE CLIENT POD</button>
+    </div>
+    <div id="pod-list"><div class="muted" style="padding:0">No pods yet.</div></div>
+  </div>
+  <div class="dbody" id="dbody-library" style="display:none">
+    <div class="kbform">
+      <input id="spec-name" placeholder="Specialist role (e.g. QA Tester)" />
+      <input id="spec-desc" placeholder="What this role does (optional)" />
+      <input id="spec-tools" placeholder="toolsets, comma, separated (e.g. terminal, file)" />
+      <button id="spec-add">+ ADD SPECIALIST ROLE</button>
+    </div>
+    <div id="spec-list"><div class="muted" style="padding:0">No specialists yet.</div></div>
+  </div>
+  <div class="dbody" id="dbody-schedules" style="display:none">
+    <div class="kbform">
+      <input id="sch-label" placeholder="Schedule label (optional, e.g. Daily SEO audit)" />
+      <textarea id="sch-prompt" placeholder="Recurring mission prompt — the Commander runs this every interval…"></textarea>
+      <div class="schrow">
+        <input id="sch-interval" type="number" min="1" value="60" />
+        <select id="sch-unit">
+          <option value="60">minutes</option>
+          <option value="3600" selected>hours</option>
+          <option value="86400">days</option>
+        </select>
+      </div>
+      <button id="sch-add">+ SCHEDULE RECURRING MISSION</button>
+    </div>
+    <div id="sch-list"><div class="muted" style="padding:0">No schedules yet.</div></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let selectedMission = null;
+let latest = {subagents:[], missions:[], delegation:{}, stats:{}, brain:{brain:[],org:[],pods:[]}};
+let paused = false;
+let activeTab = 'activity';
+let missionFilter = '';
+let presetsOpen = false;
+let centerView = 'graph';     // 'graph' | 'org' | 'analytics'
+let activePod = 'default';    // header pod selector — scopes missions + new launches
+let drawerTab = 'brain';      // 'brain' | 'pods' | 'library' | 'schedules'
+let chainFrom = null;         // upstream mission id when staging a chained mission
+
+// Categorized mission template library. Each category holds ready-to-run
+// multi-agent missions that show off parallel delegation.
+const PRESETS = {
+  "Research": [
+    "Research the current state of small open-weight LLMs and summarise the top 3 with their strengths, licenses, and benchmark scores.",
+    "Survey the leading vector databases (pgvector, Pinecone, Qdrant, Weaviate) and produce a comparison table with tradeoffs.",
+    "Investigate 4 approaches to retrieval-augmented generation and recommend one for a 10M-document corpus with reasoning.",
+    "Gather the latest developments in AI agent frameworks and write a 5-bullet executive briefing.",
+  ],
+  "Engineering": [
+    "Audit a Python project for security issues across dependencies, secrets handling, and untrusted input. Report findings by severity.",
+    "Design a CI/CD pipeline for a Python+Node monorepo: lint, test, build, and deploy stages with caching.",
+    "Compare 3 approaches to rate-limiting an API (token bucket, sliding window, leaky bucket) and recommend one with tradeoffs.",
+    "Plan a database migration from SQLite to Postgres with zero downtime: schema, data copy, cutover, rollback.",
+  ],
+  "Product & Launch": [
+    "Plan a 3-part launch checklist for a CLI tool: documentation, packaging/distribution, and CI/release automation.",
+    "Draft a go-to-market plan for a developer tool: positioning, 3 channels, and a 30-day content calendar.",
+    "Write a product requirements doc for a multi-agent dashboard: goals, user stories, metrics, and risks.",
+    "Create a competitive analysis of 4 AI coding assistants across features, pricing, and target users.",
+  ],
+  "Content": [
+    "Write a technical blog post explaining how multi-agent orchestration works, with a diagram description and code sketch.",
+    "Produce a Twitter/X thread (8 posts) teaching the basics of prompt caching and why it matters for cost.",
+    "Draft release notes for a v0.2 update that added mission cancel, history persistence, and a theme system.",
+    "Outline a 20-minute conference talk on autonomous agent ecosystems with section timings.",
+  ],
+  "Analysis": [
+    "Break down the architecture of a typical agent framework into components and explain how they interact.",
+    "Given a hypothetical 40% latency regression in an API, enumerate likely root causes and a triage plan.",
+    "Evaluate the tradeoffs of monolith vs microservices for a 5-person startup and give a recommendation.",
+    "Analyze 3 pricing models for a SaaS product (seat, usage, tiered) and recommend one with justification.",
+  ],
+};
+let presetCat = Object.keys(PRESETS)[0];
+
+function fmtTime(t){ const d=new Date(t*1000); return d.toLocaleTimeString(); }
+function fmtDur(s){ if(s==null) return '—'; if(s<60) return s.toFixed(1)+'s';
+  const m=Math.floor(s/60), r=Math.round(s%60); return m+'m'+(r?(' '+r+'s'):''); }
+function fmtNum(n){ n=Number(n)||0; if(n>=1e6) return (n/1e6).toFixed(1)+'M';
+  if(n>=1e3) return (n/1e3).toFixed(1)+'k'; return String(n); }
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
+
+// ---- API ----
+async function loadInfo(){
+  try{
+    const r = await fetch('/api/info'); const j = await r.json();
+    $('#hq-model').textContent = j.hq.model || '—';
+    const mp=$('#hq-model'); if(mp) mp.title='provider: '+(j.hq.provider||'—');
+    const dot=$('#hq-dot');
+    if(dot){
+      const online=!!j.hq.online, ready=!!j.hq.ready;
+      dot.classList.toggle('on', online);
+      dot.classList.toggle('ready', ready && !online);
+      dot.classList.toggle('off', !ready);
+      dot.title = online ? 'Commander online — agent live'
+        : ready ? 'Ready — Commander will spin up on first mission'
+        : ('Offline — '+(j.hq.error || 'no provider/credentials resolved'));
+    }
+    $('#hq-conc').textContent = (j.delegation.max_concurrent_children ?? '—') +
+       '×d' + (j.delegation.max_spawn_depth ?? '—');
+    paused = !!j.delegation.paused; reflectPause();
+    reflectDepth(j.delegation.max_spawn_depth);
+  }catch(e){}
+}
+function reflectPause(){
+  const b=$('#pause');
+  b.textContent = paused ? '▶ Resume spawns' : '⏸ Pause spawns';
+  b.classList.toggle('armed', paused);
+}
+$('#pause').onclick = async ()=>{
+  paused = !paused;
+  await fetch('/api/pause',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({paused})});
+  reflectPause();
+  toast(paused?'Spawns paused':'Spawns resumed');
+};
+$('#export').onclick = ()=>{ window.open('/api/export','_blank'); };
+
+// ---- theme system ----
+const THEMES = ['midnight','ember','matrix','light'];
+function applyTheme(t){
+  if(t==='midnight') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
+  try{ localStorage.setItem('hq-theme', t); }catch(e){}
+}
+function currentTheme(){
+  try{ return localStorage.getItem('hq-theme') || 'midnight'; }catch(e){ return 'midnight'; }
+}
+function cycleTheme(){
+  const cur=currentTheme();
+  const next=THEMES[(THEMES.indexOf(cur)+1)%THEMES.length];
+  applyTheme(next); toast('Theme: '+next);
+}
+$('#theme').onclick = cycleTheme;
+applyTheme(currentTheme());
+
+// depth slider -> /api/depth
+let depthDragging=false;
+const depthEl=$('#depth'), depthVal=$('#depthval');
+depthEl.addEventListener('input', ()=>{ depthDragging=true; depthVal.textContent=depthEl.value; });
+depthEl.addEventListener('change', async ()=>{
+  const d=parseInt(depthEl.value,10);
+  try{
+    const r=await fetch('/api/depth',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({depth:d})});
+    const j=await r.json();
+    if(j.max_spawn_depth){ depthEl.value=j.max_spawn_depth; depthVal.textContent=j.max_spawn_depth; }
+    toast('Nesting depth → '+depthEl.value);
+  }catch(e){}
+  setTimeout(()=>{depthDragging=false;},400);
+});
+function reflectDepth(d){
+  if(depthDragging || d==null) return;
+  depthEl.value=d; depthVal.textContent=d;
+}
+
+async function launchMission(){
+  const prompt = $('#prompt').value.trim();
+  if(!prompt) return;
+  const btn=$('#launch'); btn.disabled=true; btn.textContent='DISPATCHING…';
+  const body={prompt, pod:activePod};
+  if(chainFrom) body.chained_from=chainFrom;
+  try{
+    const r = await fetch('/api/mission',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){ const e=await r.json(); toast('Could not launch: '+(e.detail||r.status)); }
+    else { const j=await r.json(); selectedMission=j.id; $('#prompt').value='';
+           toast((chainFrom?'Chained mission dispatched':'Mission dispatched')+(activePod!=='default'?' → '+podName(activePod):'')); switchTab('commander'); }
+  }catch(e){ toast('Network error'); }
+  finally{ btn.disabled=false; btn.textContent='▶ LAUNCH MISSION';
+           chainFrom=null; $('#prompt').placeholder='Describe a mission. The HQ Commander will decompose it and dispatch specialist subagents in parallel…'; }
+}
+$('#launch').onclick = launchMission;
+// keyboard: Cmd/Ctrl+Enter launches from the prompt
+$('#prompt').addEventListener('keydown', e=>{
+  if((e.metaKey||e.ctrlKey) && e.key==='Enter'){ e.preventDefault(); launchMission(); }
+});
+
+// ---- mission templates (presets) ----
+const qwrap=$('#quick');
+const presetCatEl=$('#preset-cat');
+Object.keys(PRESETS).forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=c; presetCatEl.appendChild(o); });
+presetCatEl.value=presetCat;
+presetCatEl.addEventListener('change', ()=>{ presetCat=presetCatEl.value; if(presetsOpen) renderPresets(); });
+function renderPresets(){
+  qwrap.innerHTML='';
+  if(!presetsOpen){ qwrap.classList.remove('grid'); return; }
+  qwrap.classList.add('grid');
+  (PRESETS[presetCat]||[]).forEach(q=>{
+    const b=document.createElement('button');
+    b.textContent=q; b.title='Click to load this template';
+    b.onclick=()=>{ $('#prompt').value=q; $('#prompt').focus(); presetsOpen=false; $('#preset-toggle').classList.remove('on'); renderPresets(); };
+    qwrap.appendChild(b);
+  });
+}
+$('#preset-toggle').onclick=()=>{ presetsOpen=!presetsOpen; $('#preset-toggle').classList.toggle('on',presetsOpen); renderPresets(); };
+renderPresets();
+
+// mission filter
+$('#mfilter').addEventListener('input', e=>{ missionFilter=e.target.value.toLowerCase(); renderMissions(); });
+
+// tabs
+function switchTab(t){
+  activeTab=t;
+  $('#tab-activity').classList.toggle('active', t==='activity');
+  $('#tab-commander').classList.toggle('active', t==='commander');
+  $('#feed').style.display = t==='activity' ? '' : 'none';
+  $('#cmdstream').style.display = t==='commander' ? '' : 'none';
+  if(t==='commander') renderCommander();
+}
+$('#tab-activity').onclick=()=>switchTab('activity');
+$('#tab-commander').onclick=()=>switchTab('commander');
+
+// ---- stats strip ----
+function renderStats(){
+  const s=latest.stats||{};
+  $('#s-total').textContent = s.missions_total ?? 0;
+  $('#s-running').textContent = s.missions_running ?? 0;
+  $('#s-done').textContent = s.missions_completed ?? 0;
+  $('#s-rate').textContent = (s.success_rate!=null? s.success_rate+'%':'—');
+  $('#s-active').textContent = s.active_subagents ?? latest.subagents.length ?? 0;
+  $('#s-subs').textContent = s.subagents_total ?? 0;
+  $('#s-tools').textContent = s.tool_calls_total ?? 0;
+  $('#s-tokens').textContent = fmtNum(s.tokens_total ?? 0);
+  $('#s-cost').textContent = (s.cost_total!=null && s.cost_total>0) ? '$'+Number(s.cost_total).toFixed(3) : '—';
+  $('#s-avg').textContent = fmtDur(s.avg_duration);
+  $('#s-uptime').textContent = fmtDur(s.uptime);
+}
+
+// ---- render missions list ----
+function renderMissions(){
+  const wrap=$('#missions');
+  // Scope to the active client pod (isolation): only show this pod's missions.
+  let scoped=latest.missions.filter(m=>(m.pod||'default')===activePod);
+  let ms=[...scoped].sort((a,b)=>b.created_at-a.created_at);
+  if(missionFilter) ms=ms.filter(m=>(m.prompt||'').toLowerCase().includes(missionFilter));
+  $('#mcount').textContent = scoped.length ? scoped.length+' in pod' : '';
+  if(!ms.length){ wrap.innerHTML='<div class="muted">'+(missionFilter?'No matches.':'No missions in this pod yet.')+'</div>'; return; }
+  wrap.innerHTML='';
+  ms.forEach(m=>{
+    const d=document.createElement('div');
+    d.className='mission-item'+(m.id===selectedMission?' sel':'');
+    const met=m.metrics||{};
+    d.innerHTML=`<button class="mdel" title="delete">✕</button>
+      <div class="p">${esc(m.prompt)}</div>
+      <div class="meta"><span class="badge ${m.status}">${m.status}</span>
+      <span>${fmtTime(m.created_at)}</span>
+      <span class="mm">◆${met.subagents_spawned||0}</span>
+      <span class="mm">${fmtDur(m.duration)}</span></div>`;
+    d.querySelector('.p').onclick=()=>selectMission(m.id);
+    d.querySelector('.meta').onclick=()=>selectMission(m.id);
+    d.querySelector('.mdel').onclick=async(ev)=>{
+      ev.stopPropagation();
+      await fetch('/api/mission/'+m.id,{method:'DELETE'});
+      if(selectedMission===m.id) selectedMission=null;
+      toast('Mission deleted');
+    };
+    wrap.appendChild(d);
+  });
+}
+function selectMission(id){ selectedMission=id; renderMissions(); renderDetail(); renderFeed(); renderCommander(); }
+function currentMission(){ return latest.missions.find(m=>m.id===selectedMission); }
+function podName(id){ const p=(latest.brain.pods||[]).find(x=>x.id===id); return p?p.name:id; }
+
+// ---- activity feed ----
+function renderFeed(){
+  if(activeTab!=='activity') return;
+  const wrap=$('#feed'); const m=currentMission();
+  let events = (m && m.events) ? m.events.map(e=>({...e})) : [];
+  if(!events.length){ wrap.innerHTML='<div class="muted">Awaiting mission…</div>'; return; }
+  wrap.innerHTML='';
+  events.slice(-150).reverse().forEach(e=>{
+    const d=document.createElement('div');
+    d.className='event '+(e.kind||'');
+    d.innerHTML=`<span class="ts">${fmtTime(e.t)}</span> ${esc(e.message)}`;
+    wrap.appendChild(d);
+  });
+}
+
+// ---- commander live reasoning ----
+function renderCommander(){
+  if(activeTab!=='commander') return;
+  const box=$('#cmdstream'); const m=currentMission();
+  if(!m){ box.innerHTML='<span class="muted" style="padding:0">No mission selected.</span>'; return; }
+  const txt = m.commander_stream || '';
+  const running = m.status==='running';
+  const wasBottom = box.scrollHeight-box.scrollTop-box.clientHeight < 40;
+  if(!txt && running){ box.innerHTML='<span class="muted" style="padding:0">Commander spinning up…</span>'; return; }
+  if(!txt){ box.innerHTML='<span class="muted" style="padding:0">'+esc(m.result||'(no reasoning captured)')+'</span>'; return; }
+  box.innerHTML = esc(txt) + (running?'<span class="cursor"></span>':'');
+  if(wasBottom) box.scrollTop=box.scrollHeight;
+}
+
+// ---- detail ----
+let selectedAgent=null;
+function liveOutputHtml(lines){
+  if(!lines || !lines.length) return '<div class="liveout"><span class="empty">no tool activity captured yet…</span></div>';
+  const rows = lines.slice(-40).map(l=>{
+    let cls='ln';
+    const ev=(l.ev||'');
+    if(ev.indexOf('tool')>=0) cls+=' tool';
+    else if(ev.indexOf('start')>=0) cls+=' start';
+    else if(ev.indexOf('complete')>=0) cls+=' complete';
+    else if(ev.indexOf('think')>=0) cls+=' think';
+    return `<div class="${cls}">${esc(l.text||'')}</div>`;
+  }).join('');
+  return `<div class="liveout" id="liveout">${rows}</div>`;
+}
+function renderDetail(){
+  const box=$('#detail');
+  if(selectedAgent){
+    let a=latest.subagents.find(s=>s.subagent_id===selectedAgent);
+    const mon=(latest.monitor||{})[selectedAgent];
+    if(!a && mon){
+      a={subagent_id:selectedAgent, status:'finished', model:mon.model,
+         depth:mon.depth, goal:mon.goal, tool_count:(mon.lines||[]).filter(x=>(x.ev||'').indexOf('tool')>=0).length,
+         output:mon.lines, parent_id:mon.parent_id};
+    }
+    if(a){
+      const out = (a.output && a.output.length) ? a.output : (mon? mon.lines : []);
+      const isActive = !!latest.subagents.find(s=>s.subagent_id===selectedAgent && s.status==='running');
+      box.innerHTML=`<h3>◆ SUBAGENT${a.depth>1?` · L${a.depth}`:''}</h3>
+        <div class="row"><span>id</span><b>${esc((a.subagent_id||'').slice(0,16))}</b></div>
+        <div class="row"><span>status</span><b>${esc(a.status||'')}</b></div>
+        <div class="row"><span>model</span><b>${esc(a.model||'—')}</b></div>
+        <div class="row"><span>depth</span><b>${a.depth??'—'}</b></div>
+        <div class="row"><span>parent</span><b>${esc((a.parent_id&&a.parent_id!=='HQ')?a.parent_id.slice(0,12):'HQ')}</b></div>
+        <div class="row"><span>tools used</span><b>${a.tool_count??0}</b></div>
+        <pre>${esc(a.goal||'')}</pre>
+        <div class="lbl">live output</div>
+        ${liveOutputHtml(out)}
+        ${isActive?`<button id="intr" class="cancelbtn">⏹ interrupt this agent</button>`:''}`;
+      const lo=$('#liveout'); if(lo) lo.scrollTop=lo.scrollHeight;
+      const ib=$('#intr'); if(ib) ib.onclick=async()=>{ await fetch('/api/interrupt/'+a.subagent_id,{method:'POST'}); toast('Interrupt sent'); };
+      return;
+    }
+  }
+  const m=currentMission();
+  if(m){
+    const met=m.metrics||{};
+    const canCancel = m.status==='running';
+    const finished = m.status!=='running';
+    box.innerHTML=`<h3>▣ MISSION</h3>
+      <div class="row"><span>status</span><b>${esc(m.status)}</b></div>
+      <div class="row"><span>started</span><b>${fmtTime(m.created_at)}</b></div>
+      ${m.finished_at?`<div class="row"><span>duration</span><b>${fmtDur(m.duration)}</b></div>`:''}
+      ${m.chained_from?`<div class="row"><span>chained from</span><b class="chainref" title="${esc(m.chained_from)}">⛓ ${esc(m.chained_from.slice(0,8))}</b></div>`:''}
+      <div class="metgrid">
+        <div class="m"><div class="mv">${met.subagents_spawned||0}</div><div class="mk">subagents</div></div>
+        <div class="m"><div class="mv">${met.subagent_tool_calls||0}</div><div class="mk">tool calls</div></div>
+        <div class="m"><div class="mv">${met.peak_concurrency||0}</div><div class="mk">peak parallel</div></div>
+        <div class="m"><div class="mv">${met.max_depth||1}</div><div class="mk">max depth</div></div>
+        <div class="m"><div class="mv">${fmtNum(met.total_tokens||0)}</div><div class="mk">tokens</div></div>
+        <div class="m"><div class="mv">${(met.cost_usd!=null&&met.cost_usd>0)?'$'+Number(met.cost_usd).toFixed(4):'—'}</div><div class="mk">est. cost</div></div>
+      </div>
+      <pre>${esc(m.result||m.error||'(running — the Commander is delegating…)')}</pre>
+      ${canCancel?`<button id="cancelm" class="cancelbtn">⏹ CANCEL MISSION</button>`:''}
+      ${finished?`<button id="rerunm" class="rerunbtn">↻ RE-RUN MISSION</button>`:''}
+      ${finished&&m.result?`<button id="chainm" class="rerunbtn">⛓ CHAIN NEW MISSION</button>`:''}`;
+    const cb=$('#cancelm'); if(cb) cb.onclick=async()=>{
+      cb.disabled=true; cb.textContent='cancelling…';
+      const r=await fetch('/api/mission/'+m.id+'/cancel',{method:'POST'});
+      toast(r.ok?'Mission cancelled':'Could not cancel');
+    };
+    const rb=$('#rerunm'); if(rb) rb.onclick=async()=>{
+      rb.disabled=true; rb.textContent='re-launching…';
+      try{
+        const r=await fetch('/api/mission/'+m.id+'/rerun',{method:'POST'});
+        if(r.ok){ const j=await r.json(); selectedMission=j.id; toast('Mission re-launched'); switchTab('commander'); }
+        else { const e=await r.json().catch(()=>({})); toast('Re-run failed: '+(e.detail||r.status)); rb.disabled=false; rb.textContent='↻ RE-RUN MISSION'; }
+      }catch(e){ toast('Network error'); rb.disabled=false; rb.textContent='↻ RE-RUN MISSION'; }
+    };
+    const chb=$('#chainm'); if(chb) chb.onclick=()=>{
+      // Stage a chained mission: focus the console, remember the upstream id.
+      chainFrom=m.id;
+      $('#prompt').focus();
+      $('#prompt').placeholder='Chained from '+m.id.slice(0,8)+' — describe the follow-up. The prior result is fed to the Commander.';
+      $('#launch').textContent='⛓ LAUNCH CHAINED MISSION';
+      toast('Chaining from '+m.id.slice(0,8)+' — type the follow-up & launch');
+      window.scrollTo({top:0,behavior:'smooth'});
+    };
+    return;
+  }
+  box.innerHTML='<div class="muted" style="padding:0">Select a mission or click an agent node.</div>';
+}
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>(
+  {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ===== FORCE-DIRECTED GRAPH =====
+const cv=$('#graph'), ctx=cv.getContext('2d');
+let nodes=new Map();
+let W=0,H=0,DPR=window.devicePixelRatio||1;
+function resize(){
+  const wrap=$('#graphwrap'); W=wrap.clientWidth; H=wrap.clientHeight;
+  cv.width=W*DPR; cv.height=H*DPR; cv.style.width=W+'px'; cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize',resize);
+
+function syncNodes(){
+  if(!nodes.has('HQ')) nodes.set('HQ',{x:W/2,y:H/2,vx:0,vy:0,kind:'hq',
+    status:'lead',label:'HQ',r:34});
+  const hq=nodes.get('HQ'); hq.x=hq.x||W/2; hq.y=hq.y||H/2;
+  const seen=new Set(['HQ']);
+  const running = (currentMission()?.status==='running');
+  hq.active = running;
+  latest.subagents.forEach((s,i)=>{
+    const id=s.subagent_id||('sa'+i); seen.add(id);
+    let n=nodes.get(id);
+    if(!n){
+      const ang=Math.random()*Math.PI*2;
+      n={x:W/2+Math.cos(ang)*160,y:H/2+Math.sin(ang)*160,vx:0,vy:0,kind:'sub'};
+      nodes.set(id,n);
+    }
+    n.status=s.status||'running'; n.label=(s.goal||'').slice(0,18);
+    n.r=20; n.tool=s.tool_count||0; n.id=id;
+    n.parent_id=s.parent_id||'HQ'; n.depth=(s.depth==null?1:s.depth);
+    n.output=s.output||[]; n.goal=s.goal||'';
+    n.born=n.born||performance.now();
+  });
+  for(const [id,n] of [...nodes]){
+    if(id==='HQ') continue;
+    if(!seen.has(id)){
+      n.gone=n.gone||performance.now();
+      if(performance.now()-n.gone>3500) nodes.delete(id);
+    } else { n.gone=null; }
+  }
+  $('#stat-n').textContent = latest.subagents.length;
+}
+
+let mouse={x:-1,y:-1};
+cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect();
+  mouse.x=e.clientX-r.left; mouse.y=e.clientY-r.top;});
+cv.addEventListener('click',()=>{
+  for(const [id,n] of nodes){ if(id==='HQ')continue;
+    const r=n._rdraw||n.r||16;
+    if(Math.hypot(mouse.x-n.x,mouse.y-n.y)<r+4){ selectedAgent=id; renderDetail(); return; } }
+  selectedAgent=null; renderDetail();
+});
+
+function step(){
+  const hq=nodes.get('HQ'); if(!hq){ requestAnimationFrame(step); return; }
+  hq.vx+=( W/2 - hq.x)*0.02; hq.vy+=( H/2 - hq.y)*0.02;
+  hq.vx*=0.8; hq.vy*=0.8; hq.x+=hq.vx; hq.y+=hq.vy;
+  const subs=[...nodes.entries()].filter(([id])=>id!=='HQ');
+  subs.forEach(([id,n])=>{
+    let parent=nodes.get(n.parent_id);
+    if(!parent) parent=hq;
+    const dx=n.x-parent.x, dy=n.y-parent.y, d=Math.hypot(dx,dy)||1;
+    const depth=Math.max(1, n.depth||1);
+    const target=Math.max(70, 150 - (depth-1)*42);
+    const f=(target-d)*0.012;
+    n.vx+=dx/d*f; n.vy+=dy/d*f;
+    subs.forEach(([id2,m])=>{ if(id2===id)return;
+      const ex=n.x-m.x,ey=n.y-m.y,ed=Math.hypot(ex,ey)||1;
+      if(ed<64){ n.vx+=ex/ed*0.6; n.vy+=ey/ed*0.6; } });
+    n.vx*=0.85; n.vy*=0.85; n.x+=n.vx; n.y+=n.vy;
+  });
+  draw();
+  requestAnimationFrame(step);
+}
+
+function colorFor(n){
+  if(n.kind==='hq') return getCss('--accent');
+  if(n.status==='completed'||n.status==='done') return getCss('--done');
+  if(n.status==='failed'||n.status==='error') return getCss('--fail');
+  if(n.status==='running') return getCss('--run');
+  return getCss('--idle');
+}
+function getCss(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const hq=nodes.get('HQ'); const now=performance.now();
+  for(const [id,n] of nodes){ if(id==='HQ')continue;
+    let p=nodes.get(n.parent_id)||hq;
+    const grad=ctx.createLinearGradient(p.x,p.y,n.x,n.y);
+    grad.addColorStop(0,'rgba(54,224,200,.5)');
+    grad.addColorStop(1,'rgba(91,140,255,.15)');
+    ctx.strokeStyle=grad; ctx.lineWidth=(n.depth>1?1.0:1.4);
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(n.x,n.y); ctx.stroke();
+    if(n.status==='running'){
+      const t=((now/900)%1);
+      const px=p.x+(n.x-p.x)*t, py=p.y+(n.y-p.y)*t;
+      ctx.fillStyle=getCss('--accent'); ctx.beginPath();
+      ctx.arc(px,py,2.6,0,7); ctx.fill();
+    }
+  }
+  for(const [id,n] of nodes){
+    const r = n.kind==='hq' ? 34 : Math.max(11, 20 - ((n.depth||1)-1)*4);
+    n._rdraw=r;
+    const c=colorFor(n); const hover=Math.hypot(mouse.x-n.x,mouse.y-n.y)<r+4;
+    const sel = (selectedAgent===id);
+    if(n.status==='running'||n.kind==='hq'||sel){
+      const pulse=1+0.12*Math.sin(now/300+ (n.x));
+      ctx.beginPath(); ctx.arc(n.x,n.y,r*pulse+6,0,7);
+      ctx.strokeStyle=(sel?getCss('--accent'):c)+ (sel?'aa':'55'); ctx.lineWidth=sel?2.5:2; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(n.x,n.y,r,0,7);
+    const g=ctx.createRadialGradient(n.x,n.y,2,n.x,n.y,r);
+    g.addColorStop(0,c); g.addColorStop(1, n.kind==='hq'?'#0a3d3a':'#101a2e');
+    ctx.fillStyle=g; ctx.fill();
+    ctx.lineWidth=hover||sel?2.5:1.4; ctx.strokeStyle=c; ctx.stroke();
+    ctx.fillStyle=n.kind==='hq'?'#03121a':'#cfe';
+    ctx.font=(n.kind==='hq'?'bold 13px':'10px')+' ui-monospace,monospace';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(n.kind==='hq'?'HQ':'◆', n.x, n.y);
+    if(n.kind!=='hq'){
+      ctx.fillStyle=getCss('--dim'); ctx.font='9px ui-monospace,monospace';
+      ctx.fillText((n.label||'').slice(0,16), n.x, n.y+r+10);
+    }
+  }
+  if(hq){ ctx.fillStyle=getCss('--accent'); ctx.font='10px ui-monospace,monospace';
+    ctx.textAlign='center'; ctx.fillText('COMMANDER', hq.x, hq.y+(hq._rdraw||34)+12); }
+}
+
+// ===== POD SELECTOR (header) — scopes missions & launches =====
+function renderPodSelect(){
+  const sel=$('#podselect'); const pods=latest.brain.pods||[];
+  const prev=activePod;
+  sel.innerHTML='';
+  pods.forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=p.name; sel.appendChild(o); });
+  if(!pods.some(p=>p.id===activePod)) activePod='default';
+  sel.value=activePod;
+}
+$('#podselect').addEventListener('change', e=>{
+  activePod=e.target.value;
+  selectedMission=null;
+  toast('Pod: '+podName(activePod));
+  renderMissions(); renderDetail(); renderFeed(); renderCommander();
+});
+
+// ===== CENTER VIEW SWITCH (graph | org | analytics) =====
+function setCenterView(v){
+  centerView=v;
+  $('#view-graph').classList.toggle('active', v==='graph');
+  $('#view-org').classList.toggle('active', v==='org');
+  $('#view-analytics').classList.toggle('active', v==='analytics');
+  $('#graphwrap').style.display = v==='graph' ? '' : 'none';
+  $('#orgwrap').style.display = v==='org' ? 'flex' : 'none';
+  $('#analyticswrap').style.display = v==='analytics' ? 'flex' : 'none';
+  if(v==='graph'){ resize(); }
+  if(v==='org'){ renderOrg(); }
+  if(v==='analytics'){ renderAnalytics(); }
+}
+$('#view-graph').onclick=()=>setCenterView('graph');
+$('#view-org').onclick=()=>setCenterView('org');
+$('#view-analytics').onclick=()=>setCenterView('analytics');
+
+// ===== INTER-POD ANALYTICS =====
+async function renderAnalytics(){
+  const body=$('#analyticsbody');
+  body.innerHTML='<div class="muted">Loading…</div>';
+  let rows=[];
+  try{ const r=await fetch('/api/analytics/pods'); rows=(await r.json()).pods||[]; }
+  catch(e){ body.innerHTML='<div class="muted">Could not load analytics.</div>'; return; }
+  if(!rows.length){ body.innerHTML='<div class="muted">No missions yet.</div>'; return; }
+  const maxM=Math.max(1,...rows.map(r=>r.missions));
+  body.innerHTML='';
+  rows.forEach(r=>{
+    const card=document.createElement('div'); card.className='podstat';
+    const barW=Math.round(r.missions/maxM*100);
+    card.innerHTML=`<div class="podstat-h"><b>${esc(r.name)}</b>
+        <span class="podstat-sub">${r.missions} mission${r.missions===1?'':'s'}</span></div>
+      <div class="podbar"><div class="podbar-f" style="width:${barW}%"></div></div>
+      <div class="podstat-grid">
+        <div><span>${r.success_rate}%</span><em>success</em></div>
+        <div><span>${r.completed}</span><em>completed</em></div>
+        <div><span>${r.subagents}</span><em>subagents</em></div>
+        <div><span>${r.tool_calls}</span><em>tool calls</em></div>
+        <div><span>${fmtNum(r.tokens)}</span><em>tokens</em></div>
+        <div><span>${(r.cost_usd>0)?'$'+Number(r.cost_usd).toFixed(3):'—'}</span><em>cost</em></div>
+        <div><span>${fmtDur(r.avg_duration)}</span><em>avg dur</em></div>
+      </div>`;
+    body.appendChild(card);
+  });
+}
+
+// ===== ORG CHART (verticals → specialists → sub-agents) =====
+function renderOrg(){
+  const body=$('#orgbody'); const org=latest.brain.org||[];
+  if(!org.length){ body.innerHTML='<div class="muted">No verticals defined. Add one to shape the agency.</div>'; return; }
+  body.innerHTML='';
+  org.forEach(v=>{
+    const card=document.createElement('div'); card.className='vert';
+    let specsHtml='';
+    (v.specialists||[]).forEach(s=>{
+      const subs=(s.subagents||[]).map(x=>`<span class="sub">${esc(x)}</span>`).join('');
+      specsHtml+=`<div class="spec"><div class="sname">${esc(s.name)}</div>`+
+                 (subs?`<div class="subs">${subs}</div>`:'')+`</div>`;
+    });
+    card.innerHTML=`<div class="vhead">
+        <div><div class="vname">${esc(v.name)}</div>${v.outcome?`<div class="voutcome">${esc(v.outcome)}</div>`:''}</div>
+        <button class="vdel" title="delete vertical">✕</button>
+      </div>
+      <div class="vbody">${specsHtml||'<div class="muted" style="padding:2px 0">no specialists</div>'}</div>`;
+    card.querySelector('.vdel').onclick=async()=>{
+      if(!confirm('Delete vertical "'+v.name+'"?')) return;
+      await fetch('/api/org/vertical/'+v.id,{method:'DELETE'}); toast('Vertical removed');
+    };
+    body.appendChild(card);
+  });
+}
+$('#addvert').onclick=async()=>{
+  const name=prompt('New department vertical name:'); if(!name) return;
+  const outcome=prompt('Its outcome (optional):')||'';
+  await fetch('/api/org/vertical',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name, outcome})});
+  toast('Vertical added');
+};
+
+// ===== BRAIN DRAWER (gBRAIN knowledge + client pods + library + schedules) =====
+function openDrawer(){ $('#scrim').classList.add('open'); $('#drawer').classList.add('open');
+  renderBrain(); renderPods(); renderLibrary(); renderSchedules(); }
+function closeDrawer(){ $('#scrim').classList.remove('open'); $('#drawer').classList.remove('open'); }
+$('#brainbtn').onclick=openDrawer;
+$('#drawer-close').onclick=closeDrawer;
+$('#scrim').onclick=closeDrawer;
+function setDrawerTab(t){
+  drawerTab=t;
+  const tabs=['brain','pods','library','schedules'];
+  tabs.forEach(x=>{
+    $('#dtab-'+x).classList.toggle('active', t===x);
+    $('#dbody-'+x).style.display = t===x ? '' : 'none';
+  });
+  if(t==='library') renderLibrary();
+  if(t==='schedules') renderSchedules();
+}
+$('#dtab-brain').onclick=()=>setDrawerTab('brain');
+$('#dtab-pods').onclick=()=>setDrawerTab('pods');
+$('#dtab-library').onclick=()=>setDrawerTab('library');
+$('#dtab-schedules').onclick=()=>setDrawerTab('schedules');
+
+// -- agency brain knowledge --
+function renderBrain(){
+  const list=$('#kb-list'); const entries=latest.brain.brain||[];
+  if(!entries.length){ list.innerHTML='<div class="muted" style="padding:0">No knowledge entries yet.</div>'; return; }
+  list.innerHTML='';
+  entries.forEach(e=>{
+    const d=document.createElement('div'); d.className='kbitem';
+    const tags=(e.tags||[]).map(t=>`<span class="ktag">${esc(t)}</span>`).join('');
+    d.innerHTML=`<button class="kdel" title="delete">✕</button>
+      <div class="kt">${esc(e.title)}</div>
+      ${e.body?`<div class="kb">${esc(e.body)}</div>`:''}
+      ${tags?`<div class="ktags">${tags}</div>`:''}`;
+    d.querySelector('.kdel').onclick=async()=>{ await fetch('/api/brain/'+e.id,{method:'DELETE'}); toast('Entry removed'); };
+    list.appendChild(d);
+  });
+}
+$('#kb-add').onclick=async()=>{
+  const title=$('#kb-title').value.trim(); if(!title){ toast('Title required'); return; }
+  const body=$('#kb-body').value.trim();
+  const tags=$('#kb-tags').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const r=await fetch('/api/brain',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({title, body, tags})});
+  if(r.ok){ $('#kb-title').value=''; $('#kb-body').value=''; $('#kb-tags').value=''; toast('Added to agency brain'); }
+  else toast('Could not add');
+};
+
+// -- client pods --
+function renderPods(){
+  const list=$('#pod-list'); const pods=latest.brain.pods||[];
+  list.innerHTML='';
+  pods.forEach(p=>{
+    const d=document.createElement('div'); d.className='podcard'+(p.id===activePod?' active':'');
+    const kb=(p.brain||[]).length;
+    d.innerHTML=`<div class="pn">${p.id===activePod?'◉':'○'} ${esc(p.name)}
+        ${p.id!=='default'?'<button class="pdel" title="delete pod">✕</button>':''}</div>
+      ${p.description?`<div class="pd">${esc(p.description)}</div>`:''}
+      <div class="pmeta"><span>${kb} brain ${kb===1?'entry':'entries'}</span>
+        ${p.model?`<span>model: ${esc(p.model)}</span>`:''}
+        <span class="setactive" style="color:var(--accent);cursor:pointer">set active →</span></div>`;
+    d.querySelector('.setactive').onclick=()=>{ activePod=p.id; $('#podselect').value=p.id;
+      selectedMission=null; toast('Pod: '+p.name); renderMissions(); renderPods(); renderDetail(); };
+    const del=d.querySelector('.pdel');
+    if(del) del.onclick=async()=>{ if(!confirm('Delete pod "'+p.name+'"? Its missions stay but become orphaned.')) return;
+      await fetch('/api/pods/'+p.id,{method:'DELETE'}); if(activePod===p.id) activePod='default'; toast('Pod deleted'); };
+    list.appendChild(d);
+  });
+}
+$('#pod-add').onclick=async()=>{
+  const name=$('#pod-name').value.trim(); if(!name){ toast('Name required'); return; }
+  const description=$('#pod-desc').value.trim();
+  const r=await fetch('/api/pods',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name, description})});
+  if(r.ok){ $('#pod-name').value=''; $('#pod-desc').value=''; toast('Client pod created'); }
+  else toast('Could not create pod');
+};
+
+// -- specialist library --
+function renderLibrary(){
+  const list=$('#spec-list'); const specs=(latest.brain&&latest.brain.library)||[];
+  if(!specs.length){ list.innerHTML='<div class="muted" style="padding:0">No specialists yet.</div>'; return; }
+  list.innerHTML='';
+  specs.forEach(s=>{
+    const d=document.createElement('div'); d.className='kbitem';
+    const tools=(s.toolsets||[]).map(t=>`<span class="ktag">${esc(t)}</span>`).join('');
+    d.innerHTML=`<button class="kdel" title="delete">✕</button>
+      <div class="kt">${esc(s.name)}</div>
+      ${s.description?`<div class="kb">${esc(s.description)}</div>`:''}
+      ${tools?`<div class="ktags">${tools}</div>`:''}`;
+    d.querySelector('.kdel').onclick=async()=>{ await fetch('/api/library/'+s.id,{method:'DELETE'}); toast('Specialist removed'); };
+    list.appendChild(d);
+  });
+}
+$('#spec-add').onclick=async()=>{
+  const name=$('#spec-name').value.trim(); if(!name){ toast('Name required'); return; }
+  const description=$('#spec-desc').value.trim();
+  const toolsets=$('#spec-tools').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const r=await fetch('/api/library',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name, description, toolsets})});
+  if(r.ok){ $('#spec-name').value=''; $('#spec-desc').value=''; $('#spec-tools').value=''; toast('Specialist added'); }
+  else toast('Could not add specialist');
+};
+
+// -- recurring mission schedules --
+function fmtInterval(sec){
+  sec=Number(sec)||0;
+  if(sec%86400===0) return (sec/86400)+'d';
+  if(sec%3600===0) return (sec/3600)+'h';
+  if(sec%60===0) return (sec/60)+'m';
+  return sec+'s';
+}
+function renderSchedules(){
+  const list=$('#sch-list'); const scheds=latest.schedules||[];
+  if(!scheds.length){ list.innerHTML='<div class="muted" style="padding:0">No schedules yet.</div>'; return; }
+  list.innerHTML='';
+  scheds.forEach(s=>{
+    const d=document.createElement('div'); d.className='kbitem'+(s.enabled?'':' off');
+    const nextIn = s.next_run? Math.max(0, s.next_run - (Date.now()/1000)) : null;
+    const nextTxt = s.enabled ? (nextIn!=null?('next in '+fmtDur(nextIn)):'pending') : 'paused';
+    d.innerHTML=`<button class="kdel" title="delete">✕</button>
+      <div class="kt">${esc(s.label||'(unnamed schedule)')} <span class="ktag">every ${fmtInterval(s.interval)}</span></div>
+      <div class="kb">${esc((s.prompt||'').slice(0,140))}${(s.prompt||'').length>140?'…':''}</div>
+      <div class="ktags"><span class="ktag">${nextTxt}</span><span class="ktag">${s.run_count||0} run${s.run_count===1?'':'s'}</span>
+        <span class="schtoggle" style="color:var(--accent);cursor:pointer">${s.enabled?'⏸ pause':'▶ resume'}</span></div>`;
+    d.querySelector('.kdel').onclick=async()=>{ await fetch('/api/schedules/'+s.id,{method:'DELETE'}); toast('Schedule removed'); };
+    d.querySelector('.schtoggle').onclick=async()=>{
+      await fetch('/api/schedules/'+s.id+'/toggle',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({enabled:!s.enabled})});
+      toast(s.enabled?'Schedule paused':'Schedule resumed');
+    };
+    list.appendChild(d);
+  });
+}
+$('#sch-add').onclick=async()=>{
+  const prompt=$('#sch-prompt').value.trim(); if(!prompt){ toast('Prompt required'); return; }
+  const n=parseFloat($('#sch-interval').value)||0;
+  const unit=parseFloat($('#sch-unit').value)||60;
+  const interval=n*unit;
+  if(interval<=0){ toast('Interval must be positive'); return; }
+  const label=$('#sch-label').value.trim();
+  const r=await fetch('/api/schedules',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prompt, interval, pod:activePod, label})});
+  if(r.ok){ $('#sch-prompt').value=''; $('#sch-label').value=''; toast('Recurring mission scheduled'); }
+  else { const e=await r.json().catch(()=>({})); toast('Could not schedule: '+(e.detail||r.status)); }
+};
+
+// ===== SSE stream =====
+function connect(){
+  const es=new EventSource('/api/stream');
+  es.onopen=()=>{ $('#conn').textContent='● live'; $('#conn').className='ok'; };
+  es.onerror=()=>{ $('#conn').textContent='● reconnecting'; $('#conn').className='bad'; };
+  es.onmessage=ev=>{
+    try{
+      latest=JSON.parse(ev.data);
+      if(!latest.brain) latest.brain={brain:[],org:[],pods:[]};
+      if(!selectedMission){
+        const scoped=latest.missions.filter(m=>(m.pod||'default')===activePod);
+        if(scoped.length) selectedMission=[...scoped].sort((a,b)=>b.created_at-a.created_at)[0].id;
+      }
+      paused=!!latest.delegation.paused; reflectPause();
+      reflectDepth(latest.delegation.max_spawn_depth);
+      $('#hq-conc').textContent=(latest.delegation.max_concurrent_children ?? '—') +
+        '×d'+(latest.delegation.max_spawn_depth ?? '—');
+      renderPodSelect();
+      syncNodes(); renderStats(); renderMissions(); renderFeed(); renderCommander(); renderDetail();
+      if(centerView==='org') renderOrg();
+      if($('#drawer').classList.contains('open')){
+        if(drawerTab==='brain') renderBrain();
+        else if(drawerTab==='pods') renderPods();
+        else if(drawerTab==='library') renderLibrary();
+        else if(drawerTab==='schedules') renderSchedules();
+      }
+    }catch(e){}
+  };
+}
+
+// global keyboard shortcut: T cycles theme (when not typing in a field)
+document.addEventListener('keydown', e=>{
+  const tag=(e.target.tagName||'').toLowerCase();
+  const typing = (tag==='input'||tag==='textarea'||tag==='select');
+  // ⌘K / Ctrl-K opens the command palette from anywhere.
+  if((e.metaKey||e.ctrlKey) && (e.key==='k'||e.key==='K')){ e.preventDefault(); openPalette(); return; }
+  if(typing) return;
+  if((e.key==='t'||e.key==='T') && !e.metaKey && !e.ctrlKey && !e.altKey){ cycleTheme(); }
+});
+
+// ===== COMMAND PALETTE =====
+function paletteCommands(){
+  const cmds=[
+    {label:'Launch mission', hint:'focus console', run:()=>{ $('#prompt').focus(); }},
+    {label:'View: Live Graph', run:()=>setCenterView('graph')},
+    {label:'View: Org Chart', run:()=>setCenterView('org')},
+    {label:'View: Analytics', run:()=>setCenterView('analytics')},
+    {label:'Open gBRAIN: Knowledge', run:()=>{ openDrawer(); setDrawerTab('brain'); }},
+    {label:'Open gBRAIN: Client Pods', run:()=>{ openDrawer(); setDrawerTab('pods'); }},
+    {label:'Open gBRAIN: Specialists', run:()=>{ openDrawer(); setDrawerTab('library'); }},
+    {label:'Open gBRAIN: Schedules', run:()=>{ openDrawer(); setDrawerTab('schedules'); }},
+    {label:(paused?'Resume':'Pause')+' subagent spawns', run:()=>$('#pause').click()},
+    {label:'Cycle theme', hint:'T', run:cycleTheme},
+    {label:'Export all missions (JSON)', run:()=>$('#export').click()},
+    {label:'Activity tab', run:()=>switchTab('activity')},
+    {label:'Commander tab', run:()=>switchTab('commander')},
+  ];
+  // Per-pod quick switch.
+  (latest.brain.pods||[]).forEach(p=>cmds.push(
+    {label:'Switch to pod: '+p.name, run:()=>{ activePod=p.id; $('#podselect').value=p.id;
+      selectedMission=null; toast('Pod: '+p.name); renderMissions(); renderDetail(); renderFeed(); renderCommander(); }}));
+  return cmds;
+}
+let paletteSel=0, paletteFiltered=[];
+function openPalette(){
+  $('#palette-scrim').classList.add('open'); $('#palette').classList.add('open');
+  $('#palette-input').value=''; paletteSel=0; renderPalette('');
+  setTimeout(()=>$('#palette-input').focus(),0);
+}
+function closePalette(){ $('#palette-scrim').classList.remove('open'); $('#palette').classList.remove('open'); }
+function renderPalette(q){
+  q=(q||'').toLowerCase().trim();
+  const all=paletteCommands();
+  paletteFiltered = q ? all.filter(c=>c.label.toLowerCase().includes(q)) : all;
+  if(paletteSel>=paletteFiltered.length) paletteSel=Math.max(0,paletteFiltered.length-1);
+  const list=$('#palette-list');
+  if(!paletteFiltered.length){ list.innerHTML='<div class="pcmd muted">No matching command</div>'; return; }
+  list.innerHTML=paletteFiltered.map((c,i)=>
+    `<div class="pcmd${i===paletteSel?' sel':''}" data-i="${i}">${esc(c.label)}${c.hint?`<span class="phint">${esc(c.hint)}</span>`:''}</div>`).join('');
+  list.querySelectorAll('.pcmd').forEach(el=>{
+    if(el.dataset.i===undefined) return;
+    el.onclick=()=>runPalette(parseInt(el.dataset.i,10));
+  });
+}
+function runPalette(i){
+  const c=paletteFiltered[i]; closePalette();
+  if(c && typeof c.run==='function'){ try{ c.run(); }catch(e){} }
+}
+$('#palette-input').addEventListener('input', e=>{ paletteSel=0; renderPalette(e.target.value); });
+$('#palette-input').addEventListener('keydown', e=>{
+  if(e.key==='Escape'){ closePalette(); }
+  else if(e.key==='ArrowDown'){ e.preventDefault(); paletteSel=Math.min(paletteFiltered.length-1,paletteSel+1); renderPalette($('#palette-input').value); }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); paletteSel=Math.max(0,paletteSel-1); renderPalette($('#palette-input').value); }
+  else if(e.key==='Enter'){ e.preventDefault(); runPalette(paletteSel); }
+});
+$('#palette-scrim').onclick=closePalette;
+
+resize(); loadInfo(); connect(); requestAnimationFrame(step);
+</script>
+</body>
+</html>
