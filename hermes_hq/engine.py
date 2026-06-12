@@ -972,34 +972,65 @@ class HQEngine:
             except Exception:
                 pass
 
-        # AIAgent.chat() drives the full agentic tool-calling loop and accepts
-        # an optional stream_callback. This is the path that lets the Commander
-        # autonomously call delegate_task while we stream its reasoning.
-        chat = getattr(agent, "chat", None)
         # Snapshot the Commander's cumulative session token/cost counters so we
         # can record the per-mission delta after the turn. HQ uses one
         # long-lived agent, so before/after deltas isolate this mission's spend.
         pre = _token_snapshot(agent)
-        if callable(chat):
+        # Prefer run_conversation() over the thin chat() wrapper: it returns the
+        # full result dict, including the `error` the core sets when the model
+        # call fails (billing/auth/HTTP 4xx). chat() returns only
+        # `final_response`, so a failed turn yields an empty string and the
+        # mission would be silently marked "completed" with no result. We surface
+        # those failures by raising, so _run_mission marks the mission failed.
+        run_conv = getattr(agent, "run_conversation", None)
+        if callable(run_conv):
             self._log_event(mission, "commander", "Commander reasoning (agentic loop)")
+            try:
+                res = run_conv(prompt, stream_callback=_on_token)
+            except TypeError:
+                # Older signature without stream_callback.
+                res = run_conv(prompt)
+            self._record_usage(mission, agent, pre)
+            return self._finalize_turn(mission, res)
+        # Fallback to chat() if run_conversation is ever renamed.
+        chat = getattr(agent, "chat", None)
+        if callable(chat):
+            self._log_event(mission, "commander", "Commander reasoning (chat)")
             try:
                 out = chat(prompt, stream_callback=_on_token)
             except TypeError:
-                # Older signature without stream_callback.
                 out = chat(prompt)
             self._record_usage(mission, agent, pre)
-            return _stringify_agent_output(out)
-        # Fallback to the lower-level loop if chat() is ever renamed.
-        run_conv = getattr(agent, "run_conversation", None)
-        if callable(run_conv):
-            self._log_event(mission, "commander", "Commander reasoning (run_conversation)")
-            out = run_conv(prompt)
-            self._record_usage(mission, agent, pre)
-            return _stringify_agent_output(out)
+            return self._finalize_turn(mission, out)
         raise RuntimeError(
             "HQ Commander agent exposes no known run method "
-            "(tried chat/run_conversation)."
+            "(tried run_conversation/chat)."
         )
+
+    def _finalize_turn(self, mission: Mission, res: Any) -> str:
+        """Extract the Commander's answer, raising if the turn actually failed.
+
+        The core's run_conversation returns ``{"final_response": ..., "error":
+        ...}``; a non-retryable model failure (e.g. billing/auth) sets ``error``
+        and a ``None`` final_response. We raise on that so the mission is marked
+        ``failed`` with the provider's message — never silently "completed".
+        """
+        if isinstance(res, dict):
+            err = res.get("error")
+            if err:
+                raise RuntimeError(str(err))
+            text = _stringify_agent_output(res.get("final_response"))
+        else:
+            text = _stringify_agent_output(res)
+        # An empty answer with no delegation means the turn produced nothing —
+        # usually a swallowed model/transport failure. Don't pass it off as done.
+        if not text.strip() and not mission.metrics.get("subagents_spawned"):
+            raise RuntimeError(
+                "HQ Commander produced no output and dispatched no subagents — "
+                "the underlying model call likely failed (check provider "
+                "credits, credentials, and model)."
+            )
+        return text
 
 
 def _token_snapshot(agent: Any) -> Dict[str, Any]:

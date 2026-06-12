@@ -201,6 +201,52 @@ def test_probe_failure_is_retried_then_succeeds(tmp_path, monkeypatch):
     assert second["ready"] is True and second["provider"] == "anthropic"
 
 
+def test_finalize_turn_raises_on_core_error(tmp_path, monkeypatch):
+    # When the core's run_conversation reports an error (billing/auth/HTTP 4xx),
+    # the mission must FAIL with that message — not be silently "completed".
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    engine_mod = importlib.import_module("hermes_hq.engine")
+    engine = engine_mod.HQEngine()
+    m = engine_mod.Mission(id="m1", prompt="p")
+    res = {"final_response": None, "error": "HTTP 400: credit balance too low"}
+    with pytest.raises(RuntimeError) as ei:
+        engine._finalize_turn(m, res)
+    assert "credit balance too low" in str(ei.value)
+
+
+def test_finalize_turn_raises_on_empty_no_delegation(tmp_path, monkeypatch):
+    # Empty answer + zero subagents = the turn produced nothing (a swallowed
+    # transport/model failure). Treat it as a failure, not success.
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    engine_mod = importlib.import_module("hermes_hq.engine")
+    engine = engine_mod.HQEngine()
+    m = engine_mod.Mission(id="m1", prompt="p")
+    with pytest.raises(RuntimeError):
+        engine._finalize_turn(m, {"final_response": "", "error": None})
+
+
+def test_finalize_turn_returns_text_on_success(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    engine_mod = importlib.import_module("hermes_hq.engine")
+    engine = engine_mod.HQEngine()
+    m = engine_mod.Mission(id="m1", prompt="p")
+    out = engine._finalize_turn(m, {"final_response": "PONG", "error": None})
+    assert out == "PONG"
+    # Plain-string returns (chat() fallback) also pass through.
+    assert engine._finalize_turn(m, "hello") == "hello"
+
+
+def test_finalize_turn_allows_empty_when_subagents_dispatched(tmp_path, monkeypatch):
+    # A Commander that fanned all work to subagents and returned no summary
+    # text is a legitimate (if terse) completion — must NOT be failed.
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    engine_mod = importlib.import_module("hermes_hq.engine")
+    engine = engine_mod.HQEngine()
+    m = engine_mod.Mission(id="m1", prompt="p")
+    m.metrics["subagents_spawned"] = 2
+    assert engine._finalize_turn(m, {"final_response": "", "error": None}) == ""
+
+
 def test_record_usage_computes_positive_delta(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     engine_mod = importlib.import_module("hermes_hq.engine")
