@@ -232,6 +232,23 @@
   .podcard .pmeta{font-size:9px;color:var(--idle);margin-top:5px;display:flex;gap:10px}
   .podcard .pdel{margin-left:auto;background:none;border:none;color:var(--idle);cursor:pointer;font-size:12px}
   .podcard .pdel:hover{color:var(--fail)}
+  .podcard .pbtoggle{cursor:pointer;color:var(--dim)}
+  .podcard .pbtoggle:hover{color:var(--accent)}
+  .podbrain{margin-top:9px;border-top:1px dashed var(--edge);padding-top:9px}
+  .pbitem{position:relative;background:var(--panel3);border:1px solid var(--edge);border-radius:7px;
+    padding:6px 26px 6px 9px;margin-bottom:6px}
+  .pbitem b{display:block;font-size:11px;color:var(--txt)}
+  .pbitem span{display:block;font-size:10px;color:var(--dim);margin-top:2px;white-space:pre-wrap;line-height:1.4}
+  .pbitem .pbdel{position:absolute;top:5px;right:8px;background:none;border:none;color:var(--idle);cursor:pointer;font-size:11px}
+  .pbitem .pbdel:hover{color:var(--fail)}
+  .pbadd{display:flex;flex-direction:column;gap:6px;margin-top:7px}
+  .pbadd input,.pbadd textarea{background:var(--panel2);border:1px solid var(--edge);color:var(--txt);
+    border-radius:7px;padding:6px 8px;font-size:11px;font-family:inherit}
+  .pbadd textarea{min-height:44px;resize:vertical}
+  .pbadd input:focus,.pbadd textarea:focus{outline:none;border-color:var(--accent)}
+  .pbadd .pb-save{background:var(--panel3);border:1px solid var(--edge);color:var(--accent);
+    border-radius:7px;padding:5px 9px;font-size:10.5px;cursor:pointer;font-family:inherit}
+  .pbadd .pb-save:hover{border-color:var(--accent)}
 
   /* right column */
   .tabs{display:flex;border-bottom:1px solid var(--edge);background:var(--panel3)}
@@ -507,6 +524,7 @@ let activePod = 'default';    // header pod selector — scopes missions + new l
 let drawerTab = 'brain';      // 'brain' | 'pods' | 'library' | 'schedules'
 let chainFrom = null;         // upstream mission id when staging a chained mission
 let hqReady = true;           // does the Commander have a resolvable provider? (from /api/info)
+const openPodBrain = new Set(); // pod ids whose inline brain editor is expanded
 
 // Categorized mission template library. Each category holds ready-to-run
 // multi-agent missions that show off parallel delegation.
@@ -1143,23 +1161,56 @@ $('#kb-add').onclick=async()=>{
 };
 
 // -- client pods --
+// True while the user is focused inside the pod list (e.g. typing a pod-brain
+// entry) — the stream loop skips re-rendering pods so input isn't wiped.
+function podListBusy(){
+  const a=document.activeElement, list=$('#pod-list');
+  return !!(a && list && list.contains(a));
+}
 function renderPods(){
   const list=$('#pod-list'); const pods=latest.brain.pods||[];
   list.innerHTML='';
   pods.forEach(p=>{
     const d=document.createElement('div'); d.className='podcard'+(p.id===activePod?' active':'');
-    const kb=(p.brain||[]).length;
+    const entries=p.brain||[]; const kb=entries.length; const open=openPodBrain.has(p.id);
+    const items = entries.length
+      ? entries.map(e=>`<div class="pbitem"><button class="pbdel" data-eid="${e.id}" title="delete">✕</button>`
+          +`<b>${esc(e.title)}</b>${e.body?`<span>${esc(e.body)}</span>`:''}</div>`).join('')
+      : '<div class="muted" style="padding:2px 0 4px">No pod-specific knowledge yet. It composes on top of the agency brain.</div>';
     d.innerHTML=`<div class="pn">${p.id===activePod?'◉':'○'} ${esc(p.name)}
         ${p.id!=='default'?'<button class="pdel" title="delete pod">✕</button>':''}</div>
       ${p.description?`<div class="pd">${esc(p.description)}</div>`:''}
-      <div class="pmeta"><span>${kb} brain ${kb===1?'entry':'entries'}</span>
+      <div class="pmeta"><span class="pbtoggle" title="manage this pod's brain">${open?'▾':'▸'} ${kb} brain ${kb===1?'entry':'entries'}</span>
         ${p.model?`<span>model: ${esc(p.model)}</span>`:''}
-        <span class="setactive" style="color:var(--accent);cursor:pointer">set active →</span></div>`;
+        <span class="setactive" style="color:var(--accent);cursor:pointer">set active →</span></div>
+      <div class="podbrain" ${open?'':'hidden'}>
+        ${items}
+        <div class="pbadd">
+          <input class="pb-title" placeholder="Pod knowledge title (e.g. Brand voice)" />
+          <textarea class="pb-body" placeholder="Knowledge for ${esc(p.name)} only…"></textarea>
+          <button class="pb-save">+ add to ${esc(p.name)} brain</button>
+        </div>
+      </div>`;
     d.querySelector('.setactive').onclick=()=>{ activePod=p.id; $('#podselect').value=p.id;
       selectedMission=null; toast('Pod: '+p.name); renderMissions(); renderPods(); renderDetail(); };
     const del=d.querySelector('.pdel');
     if(del) del.onclick=async()=>{ if(!confirm('Delete pod "'+p.name+'"? Its missions stay but become orphaned.')) return;
       await fetch('/api/pods/'+p.id,{method:'DELETE'}); if(activePod===p.id) activePod='default'; toast('Pod deleted'); };
+    d.querySelector('.pbtoggle').onclick=()=>{
+      if(openPodBrain.has(p.id)) openPodBrain.delete(p.id); else openPodBrain.add(p.id);
+      renderPods();
+    };
+    d.querySelectorAll('.pbdel').forEach(b=> b.onclick=async()=>{
+      await fetch('/api/pods/'+p.id+'/brain/'+b.dataset.eid,{method:'DELETE'}); toast('Pod knowledge removed'); });
+    const save=d.querySelector('.pb-save');
+    if(save) save.onclick=async()=>{
+      const ti=d.querySelector('.pb-title'), bo=d.querySelector('.pb-body');
+      const title=ti.value.trim(); if(!title){ toast('Title required'); return; }
+      const r=await fetch('/api/pods/'+p.id+'/brain',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({title, body:bo.value.trim()})});
+      if(r.ok){ ti.value=''; bo.value=''; openPodBrain.add(p.id); toast('Added to '+p.name+' brain'); renderPods(); }
+      else toast('Could not add pod knowledge');
+    };
     list.appendChild(d);
   });
 }
@@ -1264,7 +1315,9 @@ function connect(){
       if(centerView==='org') renderOrg();
       if($('#drawer').classList.contains('open')){
         if(drawerTab==='brain') renderBrain();
-        else if(drawerTab==='pods') renderPods();
+        // Don't rebuild the pod list while the user is typing in an inline
+        // pod-brain form — it would wipe their input every stream tick.
+        else if(drawerTab==='pods' && !podListBusy()) renderPods();
         else if(drawerTab==='library') renderLibrary();
         else if(drawerTab==='schedules') renderSchedules();
       }
