@@ -370,6 +370,13 @@ class HQEngine:
         self._agent_lock = threading.Lock()
         self._missions: Dict[str, Mission] = {}
         self._missions_lock = threading.Lock()
+        # HQ uses ONE long-lived Commander agent whose state (token counters,
+        # interrupt flag, todo store, session persistence) is shared. Concurrent
+        # turns on it would corrupt each other, so missions queue and run one at
+        # a time through this lock; `_active_mission_id` is the one currently
+        # holding it (used to route cancel/interrupt to the right mission).
+        self._run_lock = threading.Lock()
+        self._active_mission_id: Optional[str] = None
         self._creds: Dict[str, Any] = {}
         # Readiness probe state: whether the configured provider/model resolves
         # to usable credentials, independent of whether the (lazy) Commander
@@ -746,17 +753,25 @@ class HQEngine:
     # -- mission lifecycle --------------------------------------------------
 
     def cancel_mission(self, mission_id: str) -> bool:
-        """Interrupt a running mission's Commander agent."""
+        """Cancel a running or queued mission.
+
+        Only the mission currently holding the shared Commander is interrupted;
+        a mission still queued behind it is marked cancelled in place and simply
+        never starts (interrupting the agent would abort the *active* mission,
+        not this one).
+        """
         with self._missions_lock:
             m = self._missions.get(mission_id)
+            is_active = self._active_mission_id == mission_id
         if not m or m.status != "running":
             return False
-        agent = self._agent
-        if agent is not None and hasattr(agent, "interrupt"):
-            try:
-                agent.interrupt("Mission cancelled by operator from HERMES HQ.")
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("interrupt failed: %s", exc)
+        if is_active:
+            agent = self._agent
+            if agent is not None and hasattr(agent, "interrupt"):
+                try:
+                    agent.interrupt("Mission cancelled by operator from HERMES HQ.")
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("interrupt failed: %s", exc)
         m.status = "cancelled"
         self._log_event(m, "error", "Mission cancelled by operator")
         return True
@@ -905,22 +920,44 @@ class HQEngine:
             logger.debug("usage record failed: %s", exc)
 
     def _run_mission(self, mission: Mission) -> None:
-        mission.started_at = time.time()
         self._thread_mission[threading.get_ident()] = mission
         try:
             agent = self.ensure_agent()
-            self._log_event(mission, "mission_start", "HQ Commander received mission")
-            # The Commander runs a full agent turn; it autonomously calls
-            # delegate_task to fan work out to subagents. We run it as a single
-            # user message and capture the final assistant text.
-            result_text = self._run_agent_turn(agent, mission)
-            mission.result = result_text
-            # Respect a cancel that landed mid-run.
-            if mission.status != "cancelled":
-                mission.status = "completed"
-                self._log_event(mission, "mission_done", "Mission complete")
-            else:
-                self._log_event(mission, "mission_done", "Mission stopped (cancelled)")
+            # Serialize Commander turns on the shared agent (see _run_lock).
+            # A mission launched while another is running waits here rather than
+            # racing on shared agent state.
+            if not self._run_lock.acquire(blocking=False):
+                self._log_event(mission, "commander",
+                                "Queued — waiting for the Commander to free up")
+                self._run_lock.acquire()
+            try:
+                # A mission cancelled while still queued must never start.
+                if mission.status == "cancelled":
+                    mission.started_at = mission.started_at or time.time()
+                    self._log_event(mission, "mission_done",
+                                    "Mission stopped (cancelled before start)")
+                    return
+                with self._missions_lock:
+                    self._active_mission_id = mission.id
+                mission.started_at = time.time()
+                self._log_event(mission, "mission_start",
+                                "HQ Commander received mission")
+                # The Commander runs a full agent turn; it autonomously calls
+                # delegate_task to fan work out to subagents. We run it as a
+                # single user message and capture the final assistant text.
+                result_text = self._run_agent_turn(agent, mission)
+                mission.result = result_text
+                # Respect a cancel that landed mid-run.
+                if mission.status != "cancelled":
+                    mission.status = "completed"
+                    self._log_event(mission, "mission_done", "Mission complete")
+                else:
+                    self._log_event(mission, "mission_done", "Mission stopped (cancelled)")
+            finally:
+                with self._missions_lock:
+                    if self._active_mission_id == mission.id:
+                        self._active_mission_id = None
+                self._run_lock.release()
         except Exception as exc:  # noqa: BLE001 - surface any failure to UI
             logger.exception("Mission %s failed", mission.id)
             if mission.status != "cancelled":

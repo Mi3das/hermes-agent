@@ -5,8 +5,9 @@ design, all persisted to a single JSON file so they survive app restarts:
 
 1. **gBRAIN (agency brain)** -- the company's shared knowledge: playbooks,
    voice/tone, conventions, frameworks. Each entry is a titled note. The brain
-   text is composed into the HQ Commander's system prompt so every mission
-   reads from it.
+   text is composed into each mission's USER message (never the system prompt,
+   so the Commander's cached system-prompt prefix stays byte-stable) and every
+   mission reads from it.
 
 2. **Org chart** -- the configurable taxonomy of Department Verticals, each
    owning Specialist agents, each owning Scoped Sub-agents. The Commander is
@@ -200,10 +201,14 @@ class HQBrain:
         try:
             os.makedirs(self._dir, exist_ok=True)
             tmp = self._path + ".tmp"
+            # Hold the lock across BOTH the write and the replace: the tmp path
+            # is shared, so two concurrent saves must not interleave (one could
+            # otherwise os.replace a tmp the other already moved). RLock makes
+            # this safe to call from methods that already hold the lock.
             with self._lock:
                 with open(tmp, "w", encoding="utf-8") as fh:
                     json.dump(self._store, fh, default=str, indent=2)
-            os.replace(tmp, self._path)
+                os.replace(tmp, self._path)
         except Exception as exc:  # pragma: no cover
             logger.debug("gBRAIN save failed: %s", exc)
 

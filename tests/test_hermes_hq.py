@@ -247,6 +247,66 @@ def test_finalize_turn_allows_empty_when_subagents_dispatched(tmp_path, monkeypa
     assert engine._finalize_turn(m, {"final_response": "", "error": None}) == ""
 
 
+def test_missions_run_serialized_on_shared_commander(tmp_path, monkeypatch):
+    # The shared Commander agent must never run two turns at once.
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    engine_mod = importlib.import_module("hermes_hq.engine")
+    engine = engine_mod.HQEngine()
+    monkeypatch.setattr(engine, "ensure_agent", lambda: object())
+
+    state = {"active": 0, "max": 0}
+    slock = __import__("threading").Lock()
+
+    def fake_turn(agent, mission):
+        with slock:
+            state["active"] += 1
+            state["max"] = max(state["max"], state["active"])
+        time.sleep(0.15)
+        with slock:
+            state["active"] -= 1
+        return "ok"
+
+    monkeypatch.setattr(engine, "_run_agent_turn", fake_turn)
+    engine.start_mission("a")
+    engine.start_mission("b")
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        statuses = [x["status"] for x in engine.list_missions()]
+        if statuses and all(s != "running" for s in statuses):
+            break
+        time.sleep(0.05)
+    assert state["max"] == 1, "two Commander turns overlapped on the shared agent"
+    assert all(x["status"] == "completed" for x in engine.list_missions())
+
+
+def test_cancel_only_interrupts_the_active_mission(tmp_path, monkeypatch):
+    # Cancelling a QUEUED mission must not interrupt the one actually running.
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    engine_mod = importlib.import_module("hermes_hq.engine")
+    engine = engine_mod.HQEngine()
+
+    class _Agent:
+        def __init__(self):
+            self.interrupts = 0
+        def interrupt(self, msg=None):
+            self.interrupts += 1
+
+    engine._agent = _Agent()
+    active = engine_mod.Mission(id="active", prompt="p")
+    queued = engine_mod.Mission(id="queued", prompt="p")
+    engine._missions = {"active": active, "queued": queued}
+    engine._active_mission_id = "active"
+
+    # Cancelling the queued mission marks it cancelled but does NOT interrupt.
+    assert engine.cancel_mission("queued") is True
+    assert queued.status == "cancelled"
+    assert engine._agent.interrupts == 0
+    # Cancelling the active mission interrupts the shared agent exactly once.
+    assert engine.cancel_mission("active") is True
+    assert active.status == "cancelled"
+    assert engine._agent.interrupts == 1
+
+
 def test_record_usage_computes_positive_delta(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     engine_mod = importlib.import_module("hermes_hq.engine")
