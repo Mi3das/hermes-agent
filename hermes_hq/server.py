@@ -21,6 +21,7 @@ import json
 import os
 import threading
 import time
+from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -166,6 +167,21 @@ class PodBrainRequest(BaseModel):
     body: str = ""
 
 
+class OpportunityCreateRequest(BaseModel):
+    title: str
+    category: str = "general"
+    summary: str = ""
+    source: str = ""
+    draft: str = ""
+    proposed_action: str = ""
+    est_value: str = ""
+    pod: Optional[str] = "default"
+
+
+class OpportunityDecisionRequest(BaseModel):
+    note: str = ""
+
+
 def create_app(provider: Optional[str] = None, model: Optional[str] = None) -> FastAPI:
     app = FastAPI(title="HERMES HQ", version="0.1.0")
     engine = HQEngine(provider=provider, model=model)
@@ -181,6 +197,14 @@ def create_app(provider: Optional[str] = None, model: Optional[str] = None) -> F
         if os.path.isfile(idx):
             return FileResponse(idx)
         raise HTTPException(404, "dashboard not built")
+
+    @app.get("/dashboard")
+    def dashboard():
+        """The optimized command dashboard (opportunities, missions, agents)."""
+        dash = os.path.join(_STATIC, "dashboard.html")
+        if os.path.isfile(dash):
+            return FileResponse(dash)
+        raise HTTPException(404, "dashboard.html not found")
 
     # -- info ---------------------------------------------------------------
     @app.get("/api/info")
@@ -482,6 +506,7 @@ def create_app(provider: Optional[str] = None, model: Optional[str] = None) -> F
                         s["output"] = []
                 payload = {
                     "t": time.time(),
+                    "hq": engine.info(),
                     "subagents": subs,
                     "monitor": mon,
                     "missions": engine.list_missions(),
@@ -489,6 +514,9 @@ def create_app(provider: Optional[str] = None, model: Optional[str] = None) -> F
                     "stats": engine.stats(),
                     "brain": engine.brain.snapshot(),
                     "schedules": engine.list_schedules(),
+                    "opportunities": engine.opportunities.list(),
+                    "opportunity_stats": engine.opportunities.stats(),
+                    "ecosystem": engine.learning_engine.get_ecosystem_health(),
                 }
                 yield f"data: {json.dumps(payload, default=str)}\n\n"
                 await asyncio.sleep(1.0)
@@ -503,4 +531,208 @@ def create_app(provider: Optional[str] = None, model: Optional[str] = None) -> F
             },
         )
 
+    # -- Self-improvement & adaptive systems ---------------------------------
+
+    @app.get("/api/agents/{agent_id}/profile")
+    def get_agent_profile(agent_id: str):
+        """Get comprehensive agent profile including learning metrics."""
+        profile = engine.learning_engine.get_profile(agent_id)
+        if not profile:
+            raise HTTPException(404, f"Agent {agent_id} not found")
+        return {
+            "profile": {
+                "agent_id": profile.agent_id,
+                "type": profile.agent_type,
+                "total_missions": profile.total_missions,
+                "successful_missions": profile.successful_missions,
+                "failed_missions": profile.failed_missions,
+                "success_rate": (
+                    profile.successful_missions / max(1, profile.total_missions)
+                ),
+                "avg_duration": profile.avg_mission_duration,
+                "skills_count": len(profile.skills),
+            },
+            "skills": [
+                {
+                    "name": s.name,
+                    "proficiency": s.proficiency,
+                    "usage_count": s.usage_count,
+                    "success_rate": s.success_rate,
+                }
+                for s in engine.learning_engine.get_top_skills(agent_id, limit=10)
+            ],
+            "specialization": engine.learning_engine.detect_specialization(agent_id),
+            "recommendations": engine.learning_engine.get_recommendations(agent_id),
+        }
+
+    @app.get("/api/agents/{agent_id}/personas")
+    def get_agent_persona(agent_id: str):
+        """Get agent persona and communication profile."""
+        persona = engine.persona_generator.get_persona(agent_id)
+        if not persona:
+            raise HTTPException(404, f"Persona not found for {agent_id}")
+        return asdict(persona)
+
+    @app.get("/api/agents/{agent_id}/capabilities")
+    def get_agent_capabilities(agent_id: str):
+        """Get all capabilities for an agent."""
+        caps = engine.capability_manager.get_agent_capabilities(agent_id)
+        suggested = engine.capability_manager.suggest_next_capabilities(agent_id)
+        return {
+            "capabilities": {
+                name: {
+                    "name": cap.name,
+                    "category": cap.category,
+                    "level": cap.level,
+                    "unlocked": cap.unlocked_at is not None,
+                    "practice_count": cap.practice_count,
+                }
+                for name, cap in caps.items()
+            },
+            "suggested_next": suggested,
+        }
+
+    @app.post("/api/agents/{agent_id}/capabilities/{capability_name}/practice")
+    def practice_capability(agent_id: str, capability_name: str, success: bool = True):
+        """Record practice of a capability."""
+        engine.capability_manager.practice_capability(
+            agent_id, capability_name, success
+        )
+        return {"practiced": True, "agent_id": agent_id, "capability": capability_name}
+
+    @app.get("/api/ecosystem/health")
+    def get_ecosystem_health():
+        """Get overall ecosystem health metrics."""
+        return engine.learning_engine.get_ecosystem_health()
+
+    @app.get("/api/ecosystem/optimization-priorities")
+    def get_optimization_priorities():
+        """Get prioritized optimization tasks."""
+        profiles = {
+            agent_id: profile
+            for agent_id, profile in engine.learning_engine.profiles.items()
+        }
+        return {
+            "priorities": engine.optimization_engine.get_optimization_priorities(
+                profiles
+            ),
+        }
+
+    @app.get("/api/agents/{agent_id}/experience-patterns")
+    def get_experience_patterns(agent_id: str):
+        """Get patterns learned from agent experiences."""
+        all_patterns = engine.experience_collector.extract_patterns()
+        # Filter patterns relevant to this agent (would need task/agent mapping)
+        return {"patterns": all_patterns[:5]}  # Top 5 patterns
+
+    @app.get("/api/agents/{agent_id}/adaptations")
+    def get_agent_adaptations(agent_id: str):
+        """Get currently active runtime adaptations."""
+        adaptations = engine.adaptation_engine.get_active_adaptations(agent_id)
+        return {
+            "adaptations": [
+                {
+                    "type": a.adaptation_type,
+                    "parameters": a.parameters,
+                    "effectiveness": a.effectiveness,
+                }
+                for a in adaptations
+            ],
+        }
+
+    @app.get("/api/agents/evolution-summary")
+    def get_agents_evolution_summary():
+        """Get evolution summary for all agents."""
+        summaries = {}
+        for agent_id in engine.learning_engine.profiles.keys():
+            summaries[agent_id] = engine.evolution_manager.create_evolution_summary(
+                agent_id
+            )
+        return summaries
+
+    # -- Opportunity Assistant (approval-gated income pipeline) -------------
+    #
+    # Agents research + draft; a human approves anything that touches money or
+    # goes outbound. These endpoints expose the queue; approve/reject are the
+    # ONLY way an item clears the gate, and no endpoint here sends anything
+    # outbound or moves money — that remains a deliberate manual step.
+
+    @app.get("/api/opportunities")
+    def list_opportunities(state: Optional[str] = None, pod: Optional[str] = None):
+        return {
+            "opportunities": engine.opportunities.list(state=state, pod=pod),
+            "stats": engine.opportunities.stats(),
+        }
+
+    @app.get("/api/opportunities/{opp_id}")
+    def get_opportunity(opp_id: str):
+        o = engine.opportunities.get(opp_id)
+        if not o:
+            raise HTTPException(404, "no such opportunity")
+        return o
+
+    @app.post("/api/opportunities")
+    def create_opportunity(req: OpportunityCreateRequest):
+        opp = engine.opportunities.add(
+            title=req.title,
+            category=req.category,
+            summary=req.summary,
+            source=req.source,
+            draft=req.draft,
+            proposed_action=req.proposed_action,
+            est_value=req.est_value,
+            pod=(req.pod or "default"),
+        )
+        # New items start as draft; surface for review right away.
+        engine.opportunities.submit_for_review(opp.id, note="created via API")
+        return engine.opportunities.get(opp.id)
+
+    @app.post("/api/opportunities/{opp_id}/approve")
+    def approve_opportunity(opp_id: str, req: OpportunityDecisionRequest):
+        """HUMAN approval — the only path that clears the gate. Sends nothing."""
+        try:
+            result = engine.opportunities.approve(opp_id, note=req.note)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+        if result is None:
+            raise HTTPException(404, "no such opportunity")
+        return result
+
+    @app.post("/api/opportunities/{opp_id}/reject")
+    def reject_opportunity(opp_id: str, req: OpportunityDecisionRequest):
+        try:
+            result = engine.opportunities.reject(opp_id, note=req.note)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+        if result is None:
+            raise HTTPException(404, "no such opportunity")
+        return result
+
+    @app.post("/api/opportunities/{opp_id}/archive")
+    def archive_opportunity(opp_id: str, req: OpportunityDecisionRequest):
+        try:
+            result = engine.opportunities.archive(opp_id, note=req.note)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+        if result is None:
+            raise HTTPException(404, "no such opportunity")
+        return result
+
+    @app.get("/api/opportunities/{opp_id}/can-execute")
+    def can_execute_opportunity(opp_id: str):
+        """Gate check: is this opportunity cleared for a (manual) outbound step?
+
+        Returns allowed=true ONLY after explicit human approval. The rest of the
+        system must consult this before any outbound/financial action.
+        """
+        return engine.opportunities.can_execute_outbound(opp_id)
+
+    @app.delete("/api/opportunities/{opp_id}")
+    def delete_opportunity(opp_id: str):
+        if not engine.opportunities.delete(opp_id):
+            raise HTTPException(404, "no such opportunity")
+        return {"deleted": True, "id": opp_id}
+
     return app
+
+

@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HERMES HQ — Command Dashboard</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --bg-panel: #111722;
+    --bg-elev: #1a2230;
+    --bg-hover: #222c3d;
+    --border: #243047;
+    --text: #e3e8f0;
+    --text-dim: #8b97ad;
+    --text-faint: #5a6678;
+    --accent: #5b9dff;
+    --accent-dim: #2a4a7f;
+    --green: #3fb950;
+    --amber: #d29922;
+    --red: #f85149;
+    --purple: #a371f7;
+    --cyan: #39c5cf;
+    --radius: 10px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+    font-size: 15px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* ---- Layout ---- */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; gap: 18px;
+    padding: 12px 22px;
+    background: rgba(10,14,20,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .logo { font-weight: 700; font-size: 1.05rem; letter-spacing: 0.5px; display:flex; align-items:center; gap:9px; }
+  .logo .mark { color: var(--accent); font-size: 1.2rem; }
+  .hq-meta { display:flex; gap:16px; align-items:center; font-size:0.82rem; color: var(--text-dim); flex-wrap: wrap; }
+  .hq-meta b { color: var(--text); font-weight:600; }
+  .conn { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:0.8rem; color: var(--text-dim); }
+  .dot { width:9px; height:9px; border-radius:50%; background: var(--text-faint); transition: background .3s; }
+  .dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .dot.off { background: var(--red); }
+
+  nav.tabs { display:flex; gap:2px; padding: 0 16px; background: var(--bg-panel); border-bottom:1px solid var(--border); position: sticky; top: 53px; z-index: 40; overflow-x:auto; }
+  nav.tabs button {
+    background: none; border: none; color: var(--text-dim);
+    padding: 13px 18px; font-size: 0.9rem; cursor: pointer;
+    border-bottom: 2px solid transparent; white-space: nowrap;
+    font-weight: 500; transition: color .15s;
+  }
+  nav.tabs button:hover { color: var(--text); }
+  nav.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  nav.tabs button .badge { margin-left:7px; background: var(--red); color:#fff; font-size:0.68rem; padding: 1px 7px; border-radius: 10px; font-weight:700; }
+
+  main { padding: 22px; max-width: 1500px; margin: 0 auto; }
+  .view { display: none; }
+  .view.active { display: block; animation: fade .2s ease; }
+  @keyframes fade { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
+
+  /* ---- Cards / panels ---- */
+  .grid { display: grid; gap: 16px; }
+  .stat-grid { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); margin-bottom: 20px; }
+  .stat {
+    background: var(--bg-panel); border:1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 18px;
+  }
+  .stat .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-faint); margin-bottom:6px; }
+  .stat .value { font-size: 1.7rem; font-weight: 700; line-height:1.1; }
+  .stat .sub { font-size:0.76rem; color: var(--text-dim); margin-top:3px; }
+  .stat .value.green { color: var(--green); }
+  .stat .value.amber { color: var(--amber); }
+  .stat .value.red { color: var(--red); }
+  .stat .value.accent { color: var(--accent); }
+
+  .panel { background: var(--bg-panel); border:1px solid var(--border); border-radius: var(--radius); overflow:hidden; margin-bottom:18px; }
+  .panel > h2 { font-size:0.95rem; padding: 14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; font-weight:600; }
+  .panel > h2 .count { color: var(--text-faint); font-weight:500; font-size:0.82rem; }
+  .panel-body { padding: 16px 18px; }
+  .two-col { display:grid; grid-template-columns: 1.3fr 1fr; gap:18px; align-items:start; }
+  @media (max-width: 920px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* ---- Buttons / forms ---- */
+  button.btn, .btn {
+    background: var(--bg-elev); color: var(--text); border:1px solid var(--border);
+    border-radius: 8px; padding: 8px 14px; font-size:0.85rem; cursor:pointer;
+    font-weight:500; transition: background .15s, border-color .15s; display:inline-flex; align-items:center; gap:7px;
+  }
+  button.btn:hover { background: var(--bg-hover); }
+  button.btn.primary { background: var(--accent-dim); border-color: var(--accent); color:#cfe2ff; }
+  button.btn.primary:hover { background: #335a96; }
+  button.btn.green { background: #143d22; border-color: var(--green); color:#7ee291; }
+  button.btn.green:hover { background:#19542d; }
+  button.btn.red { background: #3d1a1a; border-color: var(--red); color:#ff9d96; }
+  button.btn.red:hover { background:#542020; }
+  button.btn.sm { padding:5px 10px; font-size:0.78rem; }
+  button.btn:disabled { opacity:0.4; cursor:not-allowed; }
+  textarea, input[type=text], select {
+    width:100%; background: var(--bg); color: var(--text);
+    border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+    font-size:0.88rem; font-family: inherit; resize: vertical;
+  }
+  textarea:focus, input:focus, select:focus { outline:none; border-color: var(--accent); }
+  label.fld { display:block; font-size:0.78rem; color: var(--text-dim); margin: 12px 0 5px; font-weight:500; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .check { display:flex; align-items:center; gap:8px; font-size:0.85rem; color: var(--text-dim); cursor:pointer; }
+  .check input { width:auto; }
+
+  /* ---- Lists / items ---- */
+  .item {
+    background: var(--bg-elev); border:1px solid var(--border); border-radius:9px;
+    padding: 13px 15px; margin-bottom:10px; transition: border-color .15s;
+  }
+  .item:hover { border-color: var(--accent-dim); }
+  .item .top { display:flex; align-items:center; gap:10px; }
+  .item .title { font-weight:600; font-size:0.92rem; flex:1; }
+  .item .meta { font-size:0.76rem; color: var(--text-faint); margin-top:4px; }
+  .item .body { font-size:0.84rem; color: var(--text-dim); margin-top:8px; white-space:pre-wrap; word-break: break-word; }
+
+  .badge2 { font-size:0.7rem; padding: 2px 9px; border-radius: 20px; font-weight:600; text-transform: uppercase; letter-spacing:0.4px; }
+  .s-draft { background:#26303f; color: var(--text-dim); }
+  .s-pending_review { background:#3a3115; color: var(--amber); }
+  .s-approved { background:#143d22; color: var(--green); }
+  .s-rejected { background:#3d1a1a; color: var(--red); }
+  .s-archived { background:#2a2436; color: var(--purple); }
+  .s-running { background:#15303a; color: var(--cyan); }
+  .s-completed { background:#143d22; color: var(--green); }
+  .s-failed { background:#3d1a1a; color: var(--red); }
+  .s-cancelled { background:#26303f; color: var(--text-dim); }
+
+  .risk-flag { font-size:0.7rem; padding:2px 9px; border-radius:20px; background:#3d1a1a; color:#ff9d96; font-weight:600; display:inline-flex; align-items:center; gap:5px; }
+  .gate-ok { background:#143d22; color: var(--green); }
+
+  .empty { text-align:center; color: var(--text-faint); padding: 40px 20px; font-size:0.9rem; }
+  .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size:0.8rem; }
+
+  /* ---- Modal ---- */
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:none; align-items:flex-start; justify-content:center; z-index:100; padding: 40px 16px; overflow-y:auto; }
+  .modal-bg.open { display:flex; }
+  .modal { background: var(--bg-panel); border:1px solid var(--border); border-radius:12px; max-width: 760px; width:100%; box-shadow: var(--shadow); }
+  .modal h3 { padding:16px 20px; border-bottom:1px solid var(--border); font-size:1rem; display:flex; align-items:center; gap:10px; }
+  .modal .mclose { margin-left:auto; cursor:pointer; color: var(--text-faint); background:none; border:none; font-size:1.3rem; }
+  .modal-body { padding: 18px 20px; }
+  .modal-body .draft-box { background: var(--bg); border:1px solid var(--border); border-radius:8px; padding:14px; white-space:pre-wrap; font-size:0.85rem; max-height:340px; overflow-y:auto; margin-top:6px; }
+  .kv { display:grid; grid-template-columns: 130px 1fr; gap:6px 14px; font-size:0.85rem; margin-bottom:12px; }
+  .kv dt { color: var(--text-faint); }
+
+  .banner { background:#142a1c; border:1px solid var(--green); color:#9fe6ad; padding:11px 15px; border-radius:9px; font-size:0.82rem; margin-bottom:16px; display:flex; gap:10px; align-items:flex-start; }
+  .banner.warn { background:#2e2410; border-color: var(--amber); color:#e8cf8f; }
+  .toast { position:fixed; bottom:22px; right:22px; background: var(--bg-elev); border:1px solid var(--border); border-left:3px solid var(--accent); padding:12px 18px; border-radius:9px; box-shadow:var(--shadow); font-size:0.86rem; z-index:200; opacity:0; transform: translateY(12px); transition: all .25s; }
+  .toast.show { opacity:1; transform:none; }
+  .toast.err { border-left-color: var(--red); }
+  .toast.ok { border-left-color: var(--green); }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><span class="mark">◆</span> HERMES HQ</div>
+  <div class="hq-meta" id="hqMeta">
+    <span>provider <b id="mProvider">—</b></span>
+    <span>model <b id="mModel">—</b></span>
+    <span>spawn depth <b id="mDepth">—</b></span>
+  </div>
+  <div class="conn"><span class="dot" id="connDot"></span><span id="connTxt">connecting…</span></div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-view="overview" class="active">Overview</button>
+  <button data-view="missions">Missions</button>
+  <button data-view="opportunities">Opportunities <span class="badge" id="oppBadge" style="display:none">0</span></button>
+  <button data-view="agents">Live Agents</button>
+  <button data-view="brain">Brain &amp; Org</button>
+</nav>
+
+<main>
+  <!-- ============ OVERVIEW ============ -->
+  <section class="view active" id="view-overview">
+    <div class="grid stat-grid" id="statGrid"></div>
+    <div class="two-col">
+      <div class="panel">
+        <h2>Recent Missions <span class="count" id="ovMissionCount"></span></h2>
+        <div class="panel-body" id="ovMissions"><div class="empty">No missions yet.</div></div>
+      </div>
+      <div class="panel">
+        <h2>Awaiting Your Review <span class="count" id="ovOppCount"></span></h2>
+        <div class="panel-body" id="ovOpps"><div class="empty">Nothing to review.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MISSIONS ============ -->
+  <section class="view" id="view-missions">
+    <div class="panel">
+      <h2>Launch Mission</h2>
+      <div class="panel-body">
+        <label class="fld">Mission prompt</label>
+        <textarea id="missionPrompt" rows="3" placeholder="e.g. Research 5 freelance Python gigs posted this week and draft a short proposal for each in my voice."></textarea>
+        <div class="row" style="margin-top:12px">
+          <label class="check"><input type="checkbox" id="oppTag"> Opportunity scan <span style="color:var(--text-faint)">(captures result into the approval queue)</span></label>
+          <button class="btn primary" id="launchBtn" style="margin-left:auto">▶ Launch Mission</button>
+        </div>
+        <div id="oppHint" class="banner" style="display:none;margin-top:14px">
+          <span>🔒</span><span>Opportunity scans are filed as <b>drafts pending your review</b>. Nothing is sent and no money moves — the agents only research and draft. You approve every outbound step.</span>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Missions <span class="count" id="missionsCount"></span></h2>
+      <div class="panel-body" id="missionsList"><div class="empty">No missions yet.</div></div>
+    </div>
+  </section>
+
+  <!-- ============ OPPORTUNITIES ============ -->
+  <section class="view" id="view-opportunities">
+    <div class="banner"><span>🔒</span><span><b>Human-in-the-loop.</b> Agents research and draft only. Nothing here sends email, submits forms, or moves money. An opportunity becomes executable <b>only after you approve it</b> — and even then the outbound step is a deliberate manual action.</span></div>
+    <div class="row" style="margin-bottom:14px">
+      <select id="oppFilter" style="max-width:220px">
+        <option value="">All states</option>
+        <option value="pending_review">Pending review</option>
+        <option value="approved">Approved</option>
+        <option value="draft">Draft</option>
+        <option value="rejected">Rejected</option>
+        <option value="archived">Archived</option>
+      </select>
+      <button class="btn sm" id="oppNewBtn">+ Add manually</button>
+    </div>
+    <div id="oppList"><div class="empty">No opportunities yet. Run a mission with “Opportunity scan” enabled.</div></div>
+  </section>
+
+  <!-- ============ LIVE AGENTS ============ -->
+  <section class="view" id="view-agents">
+    <div class="panel">
+      <h2>Commander Performance <span class="count">real mission outcomes</span></h2>
+      <div class="panel-body" id="ecoBody"><div class="empty">No missions recorded yet. Run a mission and its real outcome (success, duration, cost) lands here.</div></div>
+    </div>
+    <div class="panel">
+      <h2>Delegation Controls</h2>
+      <div class="panel-body row">
+        <button class="btn" id="pauseBtn">⏸ Pause spawns</button>
+        <label class="check">Max spawn depth
+          <select id="depthSel" style="width:auto"><option>1</option><option>2</option><option>3</option></select>
+        </label>
+        <span class="count" id="concurrencyInfo" style="color:var(--text-faint)"></span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Active Subagents <span class="count" id="agentsCount"></span></h2>
+      <div class="panel-body" id="agentsList"><div class="empty">No active subagents.</div></div>
+    </div>
+  </section>
+
+  <!-- ============ BRAIN ============ -->
+  <section class="view" id="view-brain">
+    <div class="two-col">
+      <div class="panel">
+        <h2>Department Verticals <span class="count" id="orgCount"></span></h2>
+        <div class="panel-body" id="orgList"><div class="empty">—</div></div>
+      </div>
+      <div class="panel">
+        <h2>Agency Brain <span class="count" id="brainCount"></span></h2>
+        <div class="panel-body" id="brainList"><div class="empty">No brain entries.</div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Detail modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h3 id="modalTitle">Detail <button class="mclose" id="modalClose">×</button></h3>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s==null?"":String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmtTime = (t) => t ? new Date(t*1000).toLocaleString() : "—";
+const ago = (t) => { if(!t) return "—"; const s=Math.floor(Date.now()/1000 - t); if(s<60)return s+"s ago"; if(s<3600)return Math.floor(s/60)+"m ago"; if(s<86400)return Math.floor(s/3600)+"h ago"; return Math.floor(s/86400)+"d ago"; };
+const fmtUsd = (n) => "$"+(Number(n)||0).toFixed(4);
+
+let STATE = { missions:[], opportunities:[], opportunity_stats:{}, ecosystem:{}, subagents:[], stats:{}, brain:{}, hq:{}, delegation:{} };
+
+/* ---- toast ---- */
+let toastTimer;
+function toast(msg, kind){ const t=$("toast"); t.textContent=msg; t.className="toast show "+(kind||""); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.className="toast",2600); }
+
+/* ---- API helpers ---- */
+async function api(path, opts){
+  const r = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}}, opts));
+  let data=null; try{ data=await r.json(); }catch(e){}
+  if(!r.ok){ throw new Error((data&&data.detail)||("HTTP "+r.status)); }
+  return data;
+}
+
+/* ---- tabs ---- */
+$("tabs").addEventListener("click", e=>{
+  const b=e.target.closest("button[data-view]"); if(!b) return;
+  document.querySelectorAll("nav.tabs button").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active");
+  document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
+  $("view-"+b.dataset.view).classList.add("active");
+});
+
+/* ---- render: overview stats ---- */
+function renderStats(){
+  const s = STATE.stats||{}, os = STATE.opportunity_stats||{};
+  const missions = STATE.missions||[];
+  const running = missions.filter(m=>m.status==="running").length;
+  const completed = missions.filter(m=>m.status==="completed").length;
+  const failed = missions.filter(m=>m.status==="failed").length;
+  const cost = missions.reduce((a,m)=>a + (m.metrics&&m.metrics.cost_usd||0), 0);
+  const pending = os.pending_review||0;
+  const cards = [
+    {label:"Missions", value:missions.length, sub:running+" running", cls:""},
+    {label:"Completed", value:completed, sub:failed+" failed", cls:"green"},
+    {label:"Awaiting review", value:pending, sub:"opportunities", cls: pending? "amber":""},
+    {label:"Approved", value:(os.by_state&&os.by_state.approved)||0, sub:"opportunities", cls:"green"},
+    {label:"Est. spend", value:fmtUsd(cost), sub:"this session", cls:"accent"},
+  ];
+  $("statGrid").innerHTML = cards.map(c=>`<div class="stat"><div class="label">${c.label}</div><div class="value ${c.cls}">${esc(c.value)}</div><div class="sub">${esc(c.sub)}</div></div>`).join("");
+}
+
+/* ---- render: mission item ---- */
+function missionItem(m, compact){
+  const dur = m.duration ? m.duration.toFixed(1)+"s" : (m.status==="running"?"running…":"—");
+  const cost = m.metrics&&m.metrics.cost_usd ? " · "+fmtUsd(m.metrics.cost_usd) : "";
+  const isOpp = (m.prompt||"").includes("[OPPORTUNITY]");
+  return `<div class="item" data-mid="${esc(m.id)}">
+    <div class="top">
+      <span class="badge2 s-${esc(m.status)}">${esc(m.status)}</span>
+      ${isOpp?'<span class="risk-flag">🔍 opportunity</span>':''}
+      <span class="title">${esc((m.prompt||"").replace("[OPPORTUNITY]","").trim().slice(0,90)||"(no prompt)")}</span>
+    </div>
+    <div class="meta">${ago(m.created_at)} · ${esc(dur)}${cost} · pod ${esc(m.pod||"default")}</div>
+    ${!compact && m.result ? `<div class="body">${esc((m.result||"").slice(0,260))}${(m.result||"").length>260?"…":""}</div>`:""}
+  </div>`;
+}
+
+function renderMissions(){
+  const list = STATE.missions||[];
+  $("missionsCount").textContent = list.length+" total";
+  $("ovMissionCount").textContent = list.length;
+  $("missionsList").innerHTML = list.length ? list.map(m=>missionItem(m,false)).join("") : '<div class="empty">No missions yet.</div>';
+  $("ovMissions").innerHTML = list.length ? list.slice(0,6).map(m=>missionItem(m,true)).join("") : '<div class="empty">No missions yet.</div>';
+}
+
+/* ---- render: opportunities ---- */
+function oppItem(o){
+  const gate = o.requires_approval
+    ? (o.state==="approved" && !o.blocked_until_approved
+        ? '<span class="risk-flag gate-ok">✓ approved — manual step OK</span>'
+        : '<span class="risk-flag">🔒 needs approval'+(o.risk_signal?(': '+esc(o.risk_signal)):'')+'</span>')
+    : '';
+  let actions = "";
+  if(o.state==="pending_review"||o.state==="draft"){
+    actions = `<button class="btn green sm" data-act="approve" data-id="${esc(o.id)}">✓ Approve</button>
+               <button class="btn red sm" data-act="reject" data-id="${esc(o.id)}">✕ Reject</button>`;
+  } else if(o.state==="approved"){
+    actions = `<button class="btn sm" data-act="archive" data-id="${esc(o.id)}">Archive</button>`;
+  } else {
+    actions = `<button class="btn sm" data-act="delete" data-id="${esc(o.id)}">Delete</button>`;
+  }
+  return `<div class="item">
+    <div class="top">
+      <span class="badge2 s-${esc(o.state)}">${esc(o.state.replace("_"," "))}</span>
+      <span class="title">${esc(o.title)}</span>
+      <button class="btn sm" data-act="view" data-id="${esc(o.id)}">View</button>
+    </div>
+    <div class="meta">${esc(o.category)} · ${ago(o.created_at)} ${o.est_value?(' · est '+esc(o.est_value)):''} ${gate}</div>
+    ${o.summary?`<div class="body">${esc(o.summary.slice(0,220))}${o.summary.length>220?"…":""}</div>`:""}
+    <div class="row" style="margin-top:10px">${actions}</div>
+  </div>`;
+}
+
+function renderOpps(){
+  const all = STATE.opportunities||[];
+  const filter = $("oppFilter").value;
+  const list = filter ? all.filter(o=>o.state===filter) : all;
+  const pending = all.filter(o=>o.state==="pending_review");
+  // badge
+  const badge = $("oppBadge");
+  if(pending.length){ badge.style.display="inline-block"; badge.textContent=pending.length; }
+  else badge.style.display="none";
+  $("oppList").innerHTML = list.length ? list.map(oppItem).join("") : '<div class="empty">Nothing here. Run a mission with “Opportunity scan” enabled.</div>';
+  // overview
+  $("ovOppCount").textContent = pending.length;
+  $("ovOpps").innerHTML = pending.length ? pending.slice(0,6).map(oppItem).join("") : '<div class="empty">Nothing to review.</div>';
+}
+
+/* ---- render: agents ---- */
+function renderAgents(){
+  // Real commander performance (from recorded mission outcomes)
+  const eco = STATE.ecosystem||{};
+  const ecoBody = $("ecoBody");
+  if(!eco || eco.status==="empty" || !eco.agents || !Object.keys(eco.agents).length){
+    ecoBody.innerHTML = '<div class="empty">No missions recorded yet. Run a mission and its real outcome (success, duration, cost) lands here.</div>';
+  } else {
+    const head = `<div class="row" style="gap:22px;margin-bottom:14px">
+      <div><div class="label" style="font-size:0.72rem;color:var(--text-faint)">STATUS</div><div style="font-weight:700;color:${eco.status==="healthy"?"var(--green)":"var(--amber)"}">${esc((eco.status||"").toUpperCase())}</div></div>
+      <div><div class="label" style="font-size:0.72rem;color:var(--text-faint)">SUCCESS RATE</div><div style="font-weight:700">${((eco.avg_success_rate||0)*100).toFixed(0)}%</div></div>
+      <div><div class="label" style="font-size:0.72rem;color:var(--text-faint)">MISSIONS</div><div style="font-weight:700">${esc(eco.total_missions||0)}</div></div>
+    </div>`;
+    const rows = Object.entries(eco.agents).map(([id,a])=>`<div class="item">
+      <div class="top"><span class="badge2 s-completed">${(a.success_rate*100).toFixed(0)}%</span><span class="title mono">${esc(id)}</span><span class="meta">${esc(a.missions)} missions</span></div>
+      <div class="meta">health ${(a.health_score*100).toFixed(0)}% · ${esc(a.skills_count)} tracked categories · type ${esc(a.type)}</div>
+    </div>`).join("");
+    ecoBody.innerHTML = head + rows;
+  }
+
+  const subs = STATE.subagents||[];
+  $("agentsCount").textContent = subs.length+" active";
+  const d = STATE.delegation||{};
+  $("concurrencyInfo").textContent = d.max_concurrent_children!=null ? ("max concurrent: "+d.max_concurrent_children) : "";
+  $("pauseBtn").textContent = d.paused ? "▶ Resume spawns" : "⏸ Pause spawns";
+  if(!subs.length){ $("agentsList").innerHTML='<div class="empty">No active subagents.</div>'; return; }
+  $("agentsList").innerHTML = subs.map(s=>{
+    const lines = (s.output||[]).map(l=>`<div class="mono" style="color:var(--text-dim)">${esc(l.text||"")}</div>`).join("");
+    return `<div class="item"><div class="top"><span class="badge2 s-running">depth ${esc(s.depth??"?")}</span><span class="title">${esc((s.goal||"subagent").slice(0,80))}</span><span class="meta">${esc(s.model||"")}</span></div>${lines?`<div class="body">${lines}</div>`:""}</div>`;
+  }).join("");
+}
+
+/* ---- render: brain ---- */
+function renderBrain(){
+  const b = STATE.brain||{};
+  const org = b.org||[], brain = b.brain||[];
+  $("orgCount").textContent = org.length;
+  $("brainCount").textContent = brain.length;
+  $("orgList").innerHTML = org.length ? org.map(v=>`<div class="item"><div class="top"><span class="title">${esc(v.name)}</span></div><div class="meta">${esc(v.outcome||"")}</div><div class="body">${(v.specialists||[]).map(s=>esc(s.name)).join(" · ")}</div></div>`).join("") : '<div class="empty">—</div>';
+  $("brainList").innerHTML = brain.length ? brain.map(e=>`<div class="item"><div class="title">${esc(e.title)}</div><div class="body">${esc((e.body||"").slice(0,200))}</div></div>`).join("") : '<div class="empty">No brain entries.</div>';
+}
+
+function renderAll(){ renderStats(); renderMissions(); renderOpps(); renderAgents(); renderBrain(); }
+
+/* ---- header ---- */
+function renderHeader(){
+  const hq=STATE.hq||{}, d=STATE.delegation||{};
+  $("mProvider").textContent = hq.provider||"—";
+  $("mModel").textContent = (hq.model||"—").split("/").pop();
+  $("mDepth").textContent = d.max_spawn_depth!=null? d.max_spawn_depth : "—";
+}
+
+/* ---- actions: missions ---- */
+$("oppTag").addEventListener("change", e=>{ $("oppHint").style.display = e.target.checked?"flex":"none"; });
+$("launchBtn").addEventListener("click", async ()=>{
+  let prompt = $("missionPrompt").value.trim();
+  if(!prompt){ toast("Enter a mission prompt","err"); return; }
+  if($("oppTag").checked && !prompt.includes("[OPPORTUNITY]")) prompt = "[OPPORTUNITY] "+prompt;
+  $("launchBtn").disabled=true;
+  try{
+    await api("/api/mission",{method:"POST",body:JSON.stringify({prompt})});
+    $("missionPrompt").value=""; $("oppTag").checked=false; $("oppHint").style.display="none";
+    toast("Mission launched","ok");
+  }catch(e){ toast("Launch failed: "+e.message,"err"); }
+  finally{ $("launchBtn").disabled=false; }
+});
+
+/* ---- actions: opportunities (event delegation) ---- */
+document.body.addEventListener("click", async e=>{
+  const btn = e.target.closest("[data-act]"); if(!btn) return;
+  const id = btn.dataset.id, act = btn.dataset.act;
+  if(act==="view"){ openOpp(id); return; }
+  if(act==="delete"){ if(!confirm("Delete this opportunity?")) return; }
+  let note = "";
+  if(act==="approve"){ note = prompt_("Approve — anything touching money or outbound becomes a MANUAL step you still perform. Add a note (optional):")||""; if(note===null) return; }
+  if(act==="reject"){ note = prompt_("Reject — note (optional):")||""; }
+  try{
+    if(act==="approve") await api(`/api/opportunities/${id}/approve`,{method:"POST",body:JSON.stringify({note})});
+    else if(act==="reject") await api(`/api/opportunities/${id}/reject`,{method:"POST",body:JSON.stringify({note})});
+    else if(act==="archive") await api(`/api/opportunities/${id}/archive`,{method:"POST",body:JSON.stringify({note})});
+    else if(act==="delete") await api(`/api/opportunities/${id}`,{method:"DELETE"});
+    toast(act+" ok","ok");
+  }catch(err){ toast(act+" failed: "+err.message,"err"); }
+});
+function prompt_(msg){ return window.prompt(msg, ""); }
+
+$("oppFilter").addEventListener("change", renderOpps);
+$("oppNewBtn").addEventListener("click", ()=>openNewOpp());
+
+/* ---- modal: opportunity detail ---- */
+async function openOpp(id){
+  let o; try{ o = await api(`/api/opportunities/${id}`); }catch(e){ toast("load failed","err"); return; }
+  let gate; try{ gate = await api(`/api/opportunities/${id}/can-execute`); }catch(e){ gate={allowed:false,reason:"?"}; }
+  $("modalTitle").innerHTML = `Opportunity <button class="mclose" id="modalClose">×</button>`;
+  $("modalClose").onclick = closeModal;
+  $("modalBody").innerHTML = `
+    <div class="kv">
+      <dt>Title</dt><dd>${esc(o.title)}</dd>
+      <dt>State</dt><dd><span class="badge2 s-${esc(o.state)}">${esc(o.state.replace("_"," "))}</span></dd>
+      <dt>Category</dt><dd>${esc(o.category)}</dd>
+      <dt>Source</dt><dd class="mono">${esc(o.source||"—")}</dd>
+      <dt>Est. value</dt><dd>${esc(o.est_value||"—")}</dd>
+      <dt>Proposed step</dt><dd>${esc(o.proposed_action||"—")}</dd>
+      <dt>Risk gate</dt><dd>${o.requires_approval?'🔒 requires approval'+(o.risk_signal?(' ('+esc(o.risk_signal)+')'):''):'open'}</dd>
+      <dt>Execute now?</dt><dd>${gate.allowed?'<span class="risk-flag gate-ok">✓ allowed (manual)</span>':'<span class="risk-flag">🔒 blocked — '+esc(gate.reason)+'</span>'}</dd>
+    </div>
+    <label class="fld">Draft (agent-produced)</label>
+    <div class="draft-box">${esc(o.draft||"(no draft)")}</div>
+    <div class="row" style="margin-top:16px">
+      ${(o.state==="pending_review"||o.state==="draft")?`<button class="btn green" data-act="approve" data-id="${esc(o.id)}">✓ Approve</button><button class="btn red" data-act="reject" data-id="${esc(o.id)}">✕ Reject</button>`:""}
+      ${o.state==="approved"?`<button class="btn" data-act="archive" data-id="${esc(o.id)}">Archive</button>`:""}
+    </div>`;
+  $("modalBg").classList.add("open");
+}
+
+function openNewOpp(){
+  $("modalTitle").innerHTML = `Add opportunity <button class="mclose" id="modalClose">×</button>`;
+  $("modalClose").onclick = closeModal;
+  $("modalBody").innerHTML = `
+    <label class="fld">Title</label><input type="text" id="noTitle" placeholder="Freelance gig / content idea…">
+    <label class="fld">Summary</label><textarea id="noSummary" rows="2"></textarea>
+    <label class="fld">Draft</label><textarea id="noDraft" rows="4"></textarea>
+    <label class="fld">Proposed next step <span style="color:var(--text-faint)">(if it sends/spends, it gets gated)</span></label><input type="text" id="noAction" placeholder="e.g. send this proposal via email">
+    <div class="row" style="margin-top:16px"><button class="btn primary" id="noSave">Save → pending review</button></div>`;
+  $("noSave").onclick = async ()=>{
+    const title=$("noTitle").value.trim(); if(!title){ toast("Title required","err"); return; }
+    try{
+      await api("/api/opportunities",{method:"POST",body:JSON.stringify({title,summary:$("noSummary").value,draft:$("noDraft").value,proposed_action:$("noAction").value})});
+      closeModal(); toast("Added → pending review","ok");
+    }catch(e){ toast("save failed: "+e.message,"err"); }
+  };
+  $("modalBg").classList.add("open");
+}
+function closeModal(){ $("modalBg").classList.remove("open"); }
+$("modalBg").addEventListener("click", e=>{ if(e.target===$("modalBg")) closeModal(); });
+
+/* ---- actions: agents ---- */
+$("pauseBtn").addEventListener("click", async ()=>{
+  const paused = !(STATE.delegation&&STATE.delegation.paused);
+  try{ await api("/api/pause",{method:"POST",body:JSON.stringify({paused})}); toast(paused?"Spawns paused":"Spawns resumed","ok"); }
+  catch(e){ toast("failed: "+e.message,"err"); }
+});
+$("depthSel").addEventListener("change", async e=>{
+  try{ await api("/api/depth",{method:"POST",body:JSON.stringify({depth:parseInt(e.target.value,10)})}); toast("Depth set","ok"); }
+  catch(err){ toast("failed: "+err.message,"err"); }
+});
+
+/* ---- SSE live stream ---- */
+let es;
+function connect(){
+  es = new EventSource("/api/stream");
+  es.onopen = ()=>{ $("connDot").className="dot live"; $("connTxt").textContent="live"; };
+  es.onerror = ()=>{ $("connDot").className="dot off"; $("connTxt").textContent="reconnecting…"; };
+  es.onmessage = (ev)=>{
+    try{
+      const d = JSON.parse(ev.data);
+      STATE.missions = d.missions||[];
+      STATE.opportunities = d.opportunities||[];
+      STATE.opportunity_stats = d.opportunity_stats||{};
+      STATE.ecosystem = d.ecosystem||{};
+      STATE.subagents = d.subagents||[];
+      STATE.stats = d.stats||{};
+      STATE.brain = d.brain||{};
+      STATE.hq = d.hq||{};
+      STATE.delegation = d.delegation||{};
+      renderHeader(); renderAll();
+    }catch(e){ /* ignore malformed frame */ }
+  };
+}
+connect();
+
+/* initial fetch in case stream is slow */
+(async()=>{ try{ const i=await api("/api/info"); STATE.hq=i.hq||{}; STATE.delegation=i.delegation||{}; renderHeader(); }catch(e){} })();
+</script>
+</body>
+</html>

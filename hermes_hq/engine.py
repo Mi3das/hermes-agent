@@ -389,6 +389,38 @@ class HQEngine:
         # The agency brain: shared knowledge, org chart, client pods.
         from hermes_hq.brain import HQBrain
         self.brain = HQBrain()
+
+        # Opportunity Assistant: approval-gated income-research/draft queue.
+        # Agents only research + draft; nothing touching money or outbound
+        # executes without explicit human approval (see opportunities.py).
+        from hermes_hq.opportunities import OpportunityQueue
+        self.opportunities = OpportunityQueue()
+        
+        # Self-improvement and adaptive systems
+        from hermes_hq.self_improvement import (
+            AgentLearningEngine,
+            AgentEvolutionManager,
+        )
+        from hermes_hq.performance import (
+            PerformanceAnalyzer,
+            OptimizationEngine,
+            ExperienceCollector,
+        )
+        from hermes_hq.adaptive import (
+            CapabilityManager,
+            RuntimeAdaptationEngine,
+            PersonaGenerator,
+        )
+        
+        self.learning_engine = AgentLearningEngine()
+        self.evolution_manager = AgentEvolutionManager(self.learning_engine)
+        self.performance_analyzer = PerformanceAnalyzer()
+        self.optimization_engine = OptimizationEngine()
+        self.experience_collector = ExperienceCollector()
+        self.capability_manager = CapabilityManager()
+        self.adaptation_engine = RuntimeAdaptationEngine()
+        self.persona_generator = PersonaGenerator()
+        
         # Map a running agent thread -> Mission, so the monitor callback can
         # attribute subagent activity to the right mission for live metrics.
         self._thread_mission: Dict[int, Mission] = {}
@@ -951,6 +983,14 @@ class HQEngine:
                 if mission.status != "cancelled":
                     mission.status = "completed"
                     self._log_event(mission, "mission_done", "Mission complete")
+                    # Opt-in opportunity capture: if this mission was tagged as
+                    # an opportunity scan, file its result into the approval-
+                    # gated queue as a DRAFT pending human review. Never auto-
+                    # approves; never executes anything outbound.
+                    try:
+                        self._maybe_capture_opportunity(mission)
+                    except Exception as exc:  # never let capture break a run
+                        logger.debug("opportunity capture failed: %s", exc)
                 else:
                     self._log_event(mission, "mission_done", "Mission stopped (cancelled)")
             finally:
@@ -967,6 +1007,13 @@ class HQEngine:
         finally:
             mission.finished_at = time.time()
             self._thread_mission.pop(threading.get_ident(), None)
+            # Record the REAL mission outcome into the learning engine so agent
+            # stats reflect actual runs (cost, tokens, duration, success) — not
+            # demo data. Never let telemetry break a mission.
+            try:
+                self._record_learning_outcome(mission)
+            except Exception as exc:
+                logger.debug("learning outcome record failed: %s", exc)
             self._save_history()
 
     def _run_agent_turn(self, agent, mission: Mission) -> str:
@@ -1068,6 +1115,116 @@ class HQEngine:
                 "credits, credentials, and model)."
             )
         return text
+
+    # -- opportunity capture (approval-gated) -------------------------------
+
+    # Missions whose prompt contains this tag are treated as opportunity scans:
+    # their result is filed into the OpportunityQueue as a DRAFT for review.
+    OPPORTUNITY_TAG = "[OPPORTUNITY]"
+
+    def _maybe_capture_opportunity(self, mission: Mission) -> None:
+        """File a completed opportunity-scan mission into the approval queue.
+
+        Only fires when the mission prompt is explicitly tagged with
+        OPPORTUNITY_TAG, so normal missions are never captured. The captured
+        item is created as a DRAFT and immediately submitted for human review —
+        it can NEVER reach `approved` without an explicit human action, and
+        nothing outbound/financial is executed here.
+        """
+        prompt = mission.prompt or ""
+        if self.OPPORTUNITY_TAG not in prompt:
+            return
+        result = (mission.result or "").strip()
+        if not result:
+            return
+        # Derive a concise title from the mission prompt (sans the tag).
+        title = prompt.replace(self.OPPORTUNITY_TAG, "").strip()
+        title = (title.splitlines()[0] if title else "Opportunity")[:120] or "Opportunity"
+        opp = self.opportunities.add(
+            title=title,
+            category="research",
+            summary=result[:2000],
+            source=f"mission:{mission.id}",
+            draft=result,
+            # The Commander is instructed (in the mission prompt template) to end
+            # with a "PROPOSED NEXT STEP:" line; we surface the whole result as
+            # the draft and let risk classification gate the action text.
+            proposed_action=self._extract_proposed_action(result),
+            mission_id=mission.id,
+            pod=mission.pod,
+        )
+        # Surface for review immediately; humans decide from here.
+        self.opportunities.submit_for_review(opp.id, note="auto-captured from mission")
+        self._log_event(
+            mission, "opportunity",
+            f"Captured opportunity {opp.id} for review "
+            f"(requires_approval={opp.requires_approval})",
+        )
+
+    @staticmethod
+    def _extract_proposed_action(result_text: str) -> str:
+        """Pull the 'PROPOSED NEXT STEP:' line out of a Commander result, if any.
+
+        Falls back to empty (which classify_risk treats as 'no action described'
+        -> not auto-gated, but still only a draft). The point is to feed the risk
+        classifier the actual action so outbound/money steps get flagged.
+        """
+        for line in (result_text or "").splitlines():
+            low = line.strip().lower()
+            if low.startswith("proposed next step") or low.startswith("next step"):
+                return line.split(":", 1)[-1].strip() if ":" in line else line.strip()
+        return ""
+
+    # -- real learning outcome recording ------------------------------------
+
+    def _record_learning_outcome(self, mission: Mission) -> None:
+        """Feed a finished mission's REAL data into the learning engine.
+
+        This is the bridge that makes agent stats reflect reality. Everything
+        recorded here comes from the mission's actual run — no synthetic values:
+          - success  := mission.status == "completed"
+          - duration := mission.duration() (real wall-clock)
+          - metrics  := the real token/cost/subagent counters the core reported
+          - learned_items := the mission's pod (the work category) — an honest,
+            observable label, NOT a fabricated skill name.
+
+        A cancelled mission is skipped: it isn't a real performance signal.
+        """
+        if mission.status == "cancelled":
+            return
+        m = mission.metrics or {}
+        # The HQ Commander is the agent that runs every mission. Attribute the
+        # outcome to it, keyed by the live model so stats are per-Commander-model.
+        info = {}
+        try:
+            info = self.info() or {}
+        except Exception:
+            pass
+        model = (info.get("model") or self._model or "unknown")
+        agent_id = f"commander:{model}"
+        success = (mission.status == "completed")
+        duration = mission.duration() or 0.0
+        metrics = {
+            "cost_usd": float(m.get("cost_usd", 0.0) or 0.0),
+            "total_tokens": float(m.get("total_tokens", 0) or 0),
+            "input_tokens": float(m.get("input_tokens", 0) or 0),
+            "output_tokens": float(m.get("output_tokens", 0) or 0),
+            "subagents_spawned": float(m.get("subagents_spawned", 0) or 0),
+        }
+        # Honest "skill" label: the pod the mission ran in (its work category).
+        # This is observed, not invented.
+        learned = [f"pod:{mission.pod}"] if mission.pod else []
+        self.learning_engine.record_mission_outcome(
+            agent_id=agent_id,
+            mission_id=mission.id,
+            agent_type="commander",
+            duration=float(duration),
+            success=success,
+            subagent_count=int(m.get("subagents_spawned", 0) or 0),
+            metrics=metrics,
+            learned_items=learned,
+            failure_reason=(mission.error if not success else None),
+        )
 
 
 def _token_snapshot(agent: Any) -> Dict[str, Any]:
