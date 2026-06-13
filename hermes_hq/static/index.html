@@ -64,6 +64,9 @@
   #offline-banner{display:flex;align-items:center;gap:9px;padding:9px 18px;font-size:12px;
     color:#fde2e2;background:linear-gradient(90deg,rgba(248,113,113,.18),rgba(248,113,113,.06));
     border-top:1px solid rgba(248,113,113,.4);border-bottom:1px solid rgba(248,113,113,.4);}
+  /* The id rule above (display:flex) outranks the UA [hidden]{display:none};
+     restore it so the banner truly hides when ready — no HUD clutter. */
+  #offline-banner[hidden]{display:none;}
   #offline-banner .ob-ic{color:#f87171;font-size:14px}
   #offline-banner b{color:#fff}
   #offline-banner code{background:rgba(0,0,0,.35);padding:1px 5px;border-radius:4px;font-size:11px}
@@ -550,27 +553,31 @@ function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('sh
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
 
 // ---- API ----
+function applyHqInfo(hq){
+  if(!hq) return;
+  $('#hq-model').textContent = hq.model || '—';
+  const mp=$('#hq-model'); if(mp) mp.title='provider: '+(hq.provider||'—');
+  const online=!!hq.online, ready=!!hq.ready;
+  hqReady = ready;
+  const dot=$('#hq-dot');
+  if(dot){
+    dot.classList.toggle('on', online);
+    dot.classList.toggle('ready', ready && !online);
+    dot.classList.toggle('off', !ready);
+    dot.title = online ? 'Commander online — agent live'
+      : ready ? 'Ready — Commander will spin up on first mission'
+      : ('Offline — '+(hq.error || 'no provider/credentials resolved'));
+  }
+  const banner=$('#offline-banner');
+  if(banner){
+    banner.hidden = ready;
+    if(!ready) $('#ob-reason').textContent = hq.error || 'no inference provider resolved';
+  }
+}
 async function loadInfo(){
   try{
     const r = await fetch('/api/info'); const j = await r.json();
-    $('#hq-model').textContent = j.hq.model || '—';
-    const mp=$('#hq-model'); if(mp) mp.title='provider: '+(j.hq.provider||'—');
-    const online=!!j.hq.online, ready=!!j.hq.ready;
-    hqReady = ready;
-    const dot=$('#hq-dot');
-    if(dot){
-      dot.classList.toggle('on', online);
-      dot.classList.toggle('ready', ready && !online);
-      dot.classList.toggle('off', !ready);
-      dot.title = online ? 'Commander online — agent live'
-        : ready ? 'Ready — Commander will spin up on first mission'
-        : ('Offline — '+(j.hq.error || 'no provider/credentials resolved'));
-    }
-    const banner=$('#offline-banner');
-    if(banner){
-      banner.hidden = ready;
-      if(!ready) $('#ob-reason').textContent = j.hq.error || 'no inference provider resolved';
-    }
+    applyHqInfo(j.hq);
     $('#hq-conc').textContent = (j.delegation.max_concurrent_children ?? '—') +
        '×d' + (j.delegation.max_spawn_depth ?? '—');
     paused = !!j.delegation.paused; reflectPause();
@@ -1247,6 +1254,7 @@ function connect(){
         const scoped=latest.missions.filter(m=>(m.pod||'default')===activePod);
         if(scoped.length) selectedMission=[...scoped].sort((a,b)=>b.created_at-a.created_at)[0].id;
       }
+      if(latest.hq) applyHqInfo(latest.hq);
       paused=!!latest.delegation.paused; reflectPause();
       reflectDepth(latest.delegation.max_spawn_depth);
       $('#hq-conc').textContent=(latest.delegation.max_concurrent_children ?? '—') +
